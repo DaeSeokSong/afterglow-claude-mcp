@@ -2,7 +2,12 @@
 
 > 퇴사한 동료를 폴더 안에 두고, Claude Code 안에서 다시 만나는 페르소나 에이전트 MCP.
 
-이 저장소는 Claude Design (claude.ai/design)에서 만든 PoC 디자인을 모던 React 스택으로 옮긴 **인터랙티브 제안서**입니다. 실제 MCP 서버 코드가 아니라, 18개의 CLI 화면 모킹을 통해 사용자가 한 번에 전체 시스템 흐름을 둘러볼 수 있게 합니다.
+이 저장소는 두 부분으로 구성됩니다.
+
+| 폴더 | 내용 |
+| --- | --- |
+| `/` (루트) | Claude Design 핸드오프 → Vite + React 19 로 옮긴 **인터랙티브 제안서**. 18개 CLI 화면 모킹을 통해 사용자가 전체 흐름을 둘러볼 수 있어요. |
+| `/server` | **실제 동작하는 MCP 서버** (`@afterglow/mcp-server`). Claude Code에 등록하면 `/afterglow init / create / list / inspect / ask` 5 개 슬래시 명령이 동작합니다. |
 
 ## 핵심 컨셉
 
@@ -75,8 +80,16 @@ src/
 └─ styles/
    └─ design.css          # 디자이너 작성 CSS (디자인 토큰 · 레이아웃 · 터미널 셸)
 
+server/                  # 실제 MCP 서버 — server/README.md 참고
+├─ src/index.ts          # MCP stdio 진입점 (5 tools)
+├─ src/storage.ts        # ~/.claude/afterglow/ 파일시스템 어댑터
+├─ src/persona.ts        # zod schema + system-prompt 렌더링
+├─ src/rag.ts            # 키워드 기반 RAG (PoC)
+├─ src/tools/            # init · create · list · inspect · ask
+└─ test/                 # vitest + stdio 핸드셰이크
+
 docs/
-└─ design-source/         # claude.ai/design 핸드오프 원본 (JSX) — 참조용
+└─ design-source/        # claude.ai/design 핸드오프 원본 (JSX) — 참조용
 ```
 
 ## 18개 화면 매핑
@@ -111,6 +124,44 @@ docs/
 - `hashchange` 이벤트로 양방향 동기화
 
 별도의 라우터 라이브러리를 두지 않습니다 — 화면이 18개로 작고, 데이터 페칭이 없는 정적 SPA이기 때문입니다.
+
+## 키보드 / 네비게이션
+
+| 단축키 | 동작 |
+| --- | --- |
+| `⌘ K` / `Ctrl K` | 명령 팔레트 (전체 18 화면 fuzzy 검색) |
+| `g + l/a/i/c/e/h/o/v` | 빠른 점프 (list / ask / inspect / create / edit / history / overview / version) |
+| `[` / `]` | 이전 / 다음 화면 |
+| `?` | 명령 팔레트 (도움말 단축) |
+
+- 화면 하단 prev/next 점프 버튼 + 톱바 ←/→ 버튼
+- 본문 안의 `T.Cmd` 또는 helper card `h-cmd` 스니펫이 `/afterglow <verb>` 패턴이면 클릭 시 해당 화면으로 이동
+- 에이전트 chip (`T.Agent`) 클릭 시 상세 보기로 이동
+
+## 실제 MCP 서버 (`/server`)
+
+```bash
+cd server
+npm install
+npm run build
+npm test                        # 12 vitest tests
+npm run test:stdio              # 실제 MCP stdio 핸드셰이크 검증
+```
+
+Claude Code 에 로컬 등록:
+
+```bash
+claude mcp add afterglow node $(pwd)/server/dist/index.js
+claude /afterglow init
+claude /afterglow create jiyoon --name 이지윤 --role "프로덕트 디자이너"
+claude /afterglow list
+```
+
+자세한 내용은 [server/README.md](server/README.md) 참고. 핵심 설계:
+
+- **`afterglow_ask` 는 LLM 을 호출하지 않습니다.** 페르소나 시스템 프롬프트 + RAG 검색 결과를 구조화된 텍스트로 묶어 반환하면, Claude Code 가 자기 컨텍스트로 직접 답변합니다.
+- 모든 데이터는 `~/.claude/afterglow/` 안의 일반 파일 (백업·이동·삭제·인계 단순).
+- RAG 는 PoC 수준의 키워드 매칭. `embeddings/` 폴더와 `rag.ts` 의 `retrieve()` 가 dense vector backend drop-in 자리.
 
 ## 톤 / 디자인 토글
 

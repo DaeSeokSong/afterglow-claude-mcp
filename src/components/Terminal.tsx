@@ -1,4 +1,5 @@
-import type { ReactNode, CSSProperties } from 'react';
+import { Children, isValidElement, type ReactNode, type CSSProperties } from 'react';
+import { navigate, screenForCommand } from '../lib/navigation';
 
 interface TerminalProps {
   title?: string;
@@ -136,50 +137,109 @@ const TAnswer = ({ children, skipped }: ChildOnly & { skipped?: boolean }) => (
   </div>
 );
 
-const TCmd = ({ children }: ChildOnly) => (
-  <span
-    style={{
-      color: 'var(--paper)',
-      background: 'rgba(245,240,228,0.06)',
-      padding: '0 6px',
-      borderRadius: 3,
-    }}
-  >
-    {children}
-  </span>
-);
+/**
+ * Walk a ReactNode tree and concatenate its text content. Used to detect
+ * whether a `<T.Cmd>` body contains a navigable slash command.
+ */
+function flattenText(node: ReactNode): string {
+  if (node == null || node === false) return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(flattenText).join('');
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return Children.toArray(node.props.children).map(flattenText).join('');
+  }
+  return '';
+}
+
+const cmdSnippetStyle: CSSProperties = {
+  color: 'var(--paper)',
+  background: 'rgba(245,240,228,0.06)',
+  padding: '0 6px',
+  borderRadius: 3,
+};
+
+const TCmd = ({ children }: ChildOnly) => {
+  const target = screenForCommand(flattenText(children));
+  if (target) {
+    return (
+      <button
+        type="button"
+        onClick={() => navigate(target)}
+        className="cli-cmd-link"
+        style={{
+          ...cmdSnippetStyle,
+          border: 'none',
+          cursor: 'pointer',
+          font: 'inherit',
+          textAlign: 'inherit',
+          textDecoration: 'underline',
+          textDecorationStyle: 'dotted',
+          textUnderlineOffset: 3,
+        }}
+        title={`${target} 화면으로 이동`}
+      >
+        {children}
+      </button>
+    );
+  }
+  return <span style={cmdSnippetStyle}>{children}</span>;
+};
 
 const PALETTE = ['#B5482C', '#1F4A48', '#5A7A3D', '#4A3B6B', '#B58A2C', '#6B3F2E'];
 
 interface TAgentProps {
   slug: string;
   color?: number;
+  /** If false, render as plain visual chip (no click handler). Defaults to true. */
+  linkable?: boolean;
 }
-const TAgent = ({ slug, color = 0 }: TAgentProps) => (
-  <span
-    style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 6,
-      background: 'rgba(245,240,228,0.05)',
-      border: '1px solid rgba(245,240,228,0.12)',
-      padding: '1px 7px',
-      borderRadius: 4,
-      fontSize: 11.5,
-    }}
-  >
-    <span
+const TAgent = ({ slug, color = 0, linkable = true }: TAgentProps) => {
+  const inner = (
+    <>
+      <span
+        style={{
+          width: 12,
+          height: 12,
+          borderRadius: 3,
+          background: PALETTE[color % 6],
+          display: 'inline-block',
+        }}
+      />
+      <span style={{ color: '#FFE3C0' }}>{slug}</span>
+    </>
+  );
+
+  const baseStyle: CSSProperties = {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    background: 'rgba(245,240,228,0.05)',
+    border: '1px solid rgba(245,240,228,0.12)',
+    padding: '1px 7px',
+    borderRadius: 4,
+    fontSize: 11.5,
+  };
+
+  if (!linkable) {
+    return <span style={baseStyle}>{inner}</span>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={() => navigate('inspect')}
+      className="cli-agent-link"
       style={{
-        width: 12,
-        height: 12,
-        borderRadius: 3,
-        background: PALETTE[color % 6],
-        display: 'inline-block',
+        ...baseStyle,
+        cursor: 'pointer',
+        font: 'inherit',
       }}
-    />
-    <span style={{ color: '#FFE3C0' }}>{slug}</span>
-  </span>
-);
+      title={`${slug} 상세 보기`}
+    >
+      {inner}
+    </button>
+  );
+};
 
 interface TBlockProps extends ChildOnly {
   who?: string;

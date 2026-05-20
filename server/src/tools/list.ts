@@ -1,0 +1,75 @@
+import { z } from 'zod';
+import { readRegistry, assertInitialized } from '../storage.js';
+import { safe, type ToolReply } from './types.js';
+
+export const listShape = {
+  status: z
+    .enum(['all', 'active', 'learning', 'paused', 'draft'])
+    .optional()
+    .describe('필터링할 상태. 기본 all.'),
+  json: z.boolean().optional().describe('JSON으로 출력 (스크립트용).'),
+} as const;
+
+interface ListArgs {
+  status?: 'all' | 'active' | 'learning' | 'paused' | 'draft';
+  json?: boolean;
+}
+
+export async function runList(args: ListArgs): Promise<ToolReply> {
+  return safe(async () => {
+  await assertInitialized();
+  const reg = await readRegistry();
+  const filter = args.status ?? 'all';
+  const filtered =
+    filter === 'all' ? reg.agents : reg.agents.filter((a) => a.status === filter);
+
+  if (args.json) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ count: filtered.length, agents: filtered }, null, 2),
+        },
+      ],
+    };
+  }
+
+  if (filtered.length === 0) {
+    const total = reg.agents.length;
+    const msg =
+      total === 0
+        ? '등록된 에이전트가 없어요. /afterglow create <slug> 로 시작하세요.'
+        : `필터(${filter})에 일치하는 에이전트가 없어요 (전체 ${total}명).`;
+    return { content: [{ type: 'text', text: msg }] };
+  }
+
+  // Render a simple monospace table.
+  const slugW = Math.max(5, ...filtered.map((a) => a.slug.length));
+  const nameW = Math.max(5, ...filtered.map((a) => a.name.length));
+  const roleW = Math.max(5, ...filtered.map((a) => a.role.length));
+
+  const rows: string[] = [];
+  rows.push(
+    `${'SLUG'.padEnd(slugW)}  ${'NAME'.padEnd(nameW)}  ${'ROLE'.padEnd(roleW)}  STATUS    TRAINED`,
+  );
+  rows.push(
+    `${'-'.repeat(slugW)}  ${'-'.repeat(nameW)}  ${'-'.repeat(roleW)}  --------  -------`,
+  );
+  for (const a of filtered) {
+    const dot =
+      a.status === 'active' ? '●'
+      : a.status === 'learning' ? '◐'
+      : a.status === 'paused' ? '○'
+      : '□';
+    const status = `${dot} ${a.status}`.padEnd(9);
+    const trained = a.trainedAt ? a.trainedAt.slice(0, 10) : '—';
+    rows.push(
+      `${a.slug.padEnd(slugW)}  ${a.name.padEnd(nameW)}  ${a.role.padEnd(roleW)}  ${status} ${trained}`,
+    );
+  }
+  rows.push('');
+  rows.push(`총 ${filtered.length} / ${reg.agents.length} 명`);
+
+  return { content: [{ type: 'text', text: rows.join('\n') }] };
+  });
+}

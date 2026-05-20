@@ -1,7 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BrandMark } from './components/ui';
 import { TweaksPanel, TweakSection, TweakColor } from './components/TweaksPanel';
+import { CommandPalette } from './components/CommandPalette';
 import { useTweaks } from './lib/tweaks';
+import {
+  SCREEN_ENTRIES,
+  navigate as navigateScreen,
+  neighbor,
+  screenForCommand,
+} from './lib/navigation';
 import { Overview } from './screens/Overview';
 import { ScreenInit, ScreenCreate } from './screens/CliInit';
 import { ScreenList, ScreenInspect } from './screens/CliView';
@@ -112,15 +119,22 @@ function readScreenFromHash(): ScreenId {
   return isScreenId(hash) ? hash : 'overview';
 }
 
+/** Detect macOS-style platforms so we can label the palette hint as ⌘K vs Ctrl K. */
+const IS_MAC =
+  typeof navigator !== 'undefined' && /mac|iphone|ipad|ipod/i.test(navigator.platform || navigator.userAgent);
+
 export default function App() {
   const [screen, setScreen] = useState<ScreenId>(readScreenFromHash);
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
+  /* Live theme variables */
   useEffect(() => {
     document.documentElement.style.setProperty('--brick', t.accent);
     document.documentElement.style.setProperty('--paper', t.paper);
   }, [t.accent, t.paper]);
 
+  /* Sync hash ← state */
   useEffect(() => {
     const next = screen === 'overview' ? '' : screen;
     if (window.location.hash.replace('#', '') !== next) {
@@ -128,14 +142,130 @@ export default function App() {
     }
   }, [screen]);
 
+  /* Sync state ← hash */
   useEffect(() => {
     const onHash = () => setScreen(readScreenFromHash());
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
+  /* ---------------------------------------------------------- */
+  /* Click delegation: any `.h-cmd` / `.cli-cmd-link` whose text */
+  /* parses to a known screen navigates on click. cli-cmd-link  */
+  /* already navigates inline so we only need h-cmd here.       */
+  /* ---------------------------------------------------------- */
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      const hcmd = target.closest('.h-cmd') as HTMLElement | null;
+      if (!hcmd) return;
+      const text = hcmd.textContent || '';
+      const next = screenForCommand(text);
+      if (next) {
+        e.preventDefault();
+        navigateScreen(next);
+      }
+    };
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, []);
+
+  /* ---------------------------------------------------------- */
+  /* Keyboard shortcuts                                          */
+  /*   - Cmd/Ctrl + K : open command palette                     */
+  /*   - g, then letter (within 1.5s) : jump to a screen         */
+  /*   - [ / ] : prev / next screen                              */
+  /*   - ? : open palette as a help affordance                   */
+  /* Shortcuts are suppressed while typing in an input/textarea  */
+  /* or while the palette is open.                               */
+  /* ---------------------------------------------------------- */
+  const gPendingRef = useRef<number | null>(null);
+
+  const isTypingTarget = (el: EventTarget | null): boolean => {
+    if (!(el instanceof HTMLElement)) return false;
+    const tag = el.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+    if (el.isContentEditable) return true;
+    return false;
+  };
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Cmd/Ctrl+K toggles the palette regardless of focus context.
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+        return;
+      }
+      if (paletteOpen) return; // palette owns Esc/Arrows/Enter while open
+      if (isTypingTarget(e.target)) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+      // `?` opens the palette as well — easy mnemonic for help.
+      if (e.key === '?') {
+        e.preventDefault();
+        setPaletteOpen(true);
+        return;
+      }
+
+      // Prev/Next via [ and ]
+      if (e.key === '[') {
+        const prev = neighbor(screen, 'prev');
+        if (prev) {
+          e.preventDefault();
+          navigateScreen(prev);
+        }
+        return;
+      }
+      if (e.key === ']') {
+        const next = neighbor(screen, 'next');
+        if (next) {
+          e.preventDefault();
+          navigateScreen(next);
+        }
+        return;
+      }
+
+      // `g` + letter
+      if (gPendingRef.current !== null) {
+        const letter = e.key.toLowerCase();
+        const match = SCREEN_ENTRIES.find((s) => s.shortcut === letter);
+        if (match) {
+          e.preventDefault();
+          navigateScreen(match.id);
+        }
+        window.clearTimeout(gPendingRef.current);
+        gPendingRef.current = null;
+        return;
+      }
+      if (e.key === 'g' || e.key === 'G') {
+        e.preventDefault();
+        gPendingRef.current = window.setTimeout(() => {
+          gPendingRef.current = null;
+        }, 1500);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      if (gPendingRef.current !== null) {
+        window.clearTimeout(gPendingRef.current);
+        gPendingRef.current = null;
+      }
+    };
+  }, [paletteOpen, screen]);
+
+  const openPalette = useCallback(() => setPaletteOpen(true), []);
+  const closePalette = useCallback(() => setPaletteOpen(false), []);
+
   const groups: Group[] = ['intro', 'setup', 'daily', 'multi', 'admin', 'docs'];
   const current = SCREENS.find((s) => s.id === screen);
+
+  const prevScreen = neighbor(screen, 'prev');
+  const nextScreen = neighbor(screen, 'next');
+  const prevLabel = prevScreen ? SCREEN_ENTRIES.find((s) => s.id === prevScreen)?.label : null;
+  const nextLabel = nextScreen ? SCREEN_ENTRIES.find((s) => s.id === nextScreen)?.label : null;
 
   return (
     <div className="app">
@@ -184,7 +314,50 @@ export default function App() {
             <div className="crumb">{current ? GROUP_LABELS[current.group] : ''}</div>
             <h1>{current?.label}</h1>
           </div>
-          <div className="topbar-right">
+          <div className="topbar-right" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {prevScreen && (
+              <button
+                onClick={() => navigateScreen(prevScreen)}
+                title={`이전: ${prevLabel ?? ''}  ·  shortcut: [`}
+                className="topbar-nav-btn"
+                aria-label="이전 화면"
+              >
+                ←
+              </button>
+            )}
+            {nextScreen && (
+              <button
+                onClick={() => navigateScreen(nextScreen)}
+                title={`다음: ${nextLabel ?? ''}  ·  shortcut: ]`}
+                className="topbar-nav-btn"
+                aria-label="다음 화면"
+              >
+                →
+              </button>
+            )}
+
+            <button
+              onClick={openPalette}
+              title="명령 팔레트 열기"
+              className="topbar-palette-btn"
+            >
+              <span style={{ fontSize: 12, color: 'var(--ink-3)' }}>화면 검색</span>
+              <span
+                style={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 11,
+                  color: 'var(--ink-3)',
+                  background: 'var(--paper)',
+                  border: '1px solid var(--hair)',
+                  borderRadius: 4,
+                  padding: '1px 5px',
+                  marginLeft: 8,
+                }}
+              >
+                {IS_MAC ? '⌘ K' : 'Ctrl K'}
+              </span>
+            </button>
+
             {current?.cmd && (
               <span
                 className="mono"
@@ -223,6 +396,52 @@ export default function App() {
           {screen === 'roadmap' && <Roadmap />}
           {screen === 'ethics' && <Ethics />}
         </div>
+
+        {(prevScreen || nextScreen) && (
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginTop: 32,
+              paddingTop: 18,
+              borderTop: '1px solid var(--hair)',
+            }}
+          >
+            {prevScreen ? (
+              <button
+                className="screen-jump"
+                onClick={() => navigateScreen(prevScreen)}
+                style={{
+                  textAlign: 'left',
+                }}
+              >
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', letterSpacing: '0.06em' }}>
+                  ← 이전
+                </div>
+                <div style={{ fontSize: 14, color: 'var(--ink)', marginTop: 2 }}>{prevLabel}</div>
+              </button>
+            ) : (
+              <span />
+            )}
+            {nextScreen ? (
+              <button
+                className="screen-jump"
+                onClick={() => navigateScreen(nextScreen)}
+                style={{
+                  textAlign: 'right',
+                }}
+              >
+                <div style={{ fontSize: 11, color: 'var(--ink-4)', letterSpacing: '0.06em' }}>
+                  다음 →
+                </div>
+                <div style={{ fontSize: 14, color: 'var(--ink)', marginTop: 2 }}>{nextLabel}</div>
+              </button>
+            ) : (
+              <span />
+            )}
+          </div>
+        )}
       </main>
 
       <TweaksPanel title="Tweaks">
@@ -241,6 +460,8 @@ export default function App() {
           />
         </TweakSection>
       </TweaksPanel>
+
+      {paletteOpen && <CommandPalette onClose={closePalette} />}
     </div>
   );
 }

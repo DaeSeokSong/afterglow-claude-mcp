@@ -3272,3 +3272,86 @@ input, textarea, select { font-family: inherit; color: inherit; }
   text-overflow: ellipsis;
   min-width: 0;
 }
+
+/* ───────────────────────────────────────────────────────────────
+   Phase 2 — interactive navigation affordances
+   added on top of the original design.css; safe to remove.
+   ─────────────────────────────────────────────────────────────── */
+
+/* clickable command snippets inside helper cards (event-delegated) */
+.h-cmd {
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.h-cmd:hover {
+  background: var(--paper);
+  color: var(--brick);
+}
+
+/* clickable T.Cmd inside the dark terminal body */
+.cli-cmd-link {
+  transition: background 120ms ease;
+}
+.cli-cmd-link:hover {
+  background: rgba(245, 240, 228, 0.16) !important;
+}
+
+/* clickable T.Agent chip */
+.cli-agent-link {
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.cli-agent-link:hover {
+  background: rgba(245, 240, 228, 0.12) !important;
+  border-color: rgba(245, 240, 228, 0.28) !important;
+}
+
+/* topbar prev / next arrows */
+.topbar-nav-btn {
+  appearance: none;
+  border: 1px solid var(--hair);
+  background: var(--paper);
+  color: var(--ink-2);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  display: grid;
+  place-items: center;
+  transition: background 120ms ease, color 120ms ease;
+}
+.topbar-nav-btn:hover {
+  background: var(--paper-2);
+  color: var(--ink);
+}
+
+/* topbar palette opener */
+.topbar-palette-btn {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--hair);
+  background: var(--paper);
+  border-radius: 6px;
+  padding: 4px 8px 4px 12px;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.topbar-palette-btn:hover {
+  background: var(--paper-2);
+}
+
+/* footer prev/next jump buttons */
+.screen-jump {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--hair);
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  min-width: 180px;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.screen-jump:hover {
+  background: var(--paper-2);
+  border-color: var(--ink-4);
+}

@@ -1,0 +1,35 @@
+{
+  "name": "@afterglow/mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Afterglow MCP server — manage 퇴사자 에이전트 폴더 + persona + RAG, surfaced as Claude Code slash commands.",
+  "type": "module",
+  "bin": {
+    "afterglow-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "test:stdio": "node test/stdio.smoke.mjs",
+    "test:all": "npm run test && npm run build && npm run test:stdio"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "typescript": "~6.0.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
