@@ -22,6 +22,7 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { PersonaSchema, renderSystemPrompt } from '../persona.js';
+import { sanitisePromptLine, sanitisePromptText } from '../sanitize.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 /* --------------------------------------------------------------- */
@@ -126,79 +127,11 @@ function uniqId(): string {
   return `q-${randomUUID()}`;
 }
 
-/**
- * Defang user-authored text before it lands in `persona.bio` (which is
- * rendered raw into the LLM system prompt by `renderSystemPrompt`).
- *
- * Markdown gives an attacker many ways to forge a header, so we close them
- * one by one:
- *
- *   · ATX headers (`#`, `##`, …) — CommonMark allows 0–3 leading spaces, so
- *     just-add-a-space is not enough. We backslash-escape the `#`.
- *   · Setext underlines (`===` / `---` on a line by itself) — these turn the
- *     PREVIOUS non-empty line into an H1/H2. We replace the run with `·`s
- *     so the underline no longer matches.
- *   · Fence escape — a user-supplied triple-backtick line would terminate
- *     the surrounding ```handoff-answers fence and let subsequent text
- *     escape into the persona-render. We replace ``` `s with the modifier-
- *     letter grave-accent character (U+02CB) so they look the same but are
- *     not a fence delimiter.
- *   · NUL bytes (filesystem API truncation) — stripped.
- *
- * Multi-line answers ARE preserved (real handoffs need them); only the
- * header / fence escape vectors are closed.
- */
-function sanitiseHandoffText(s: string, max: number): string {
-  // Step 1 — normalise so downstream regexes see consistent line endings
-  // and characters:
-  //   · drop NUL bytes (filesystem API truncation)
-  //   · fold ALL line-end variants (\r\n, lone \r per CommonMark §2.2, \n)
-  //     to a single \n; the old `\r?\n` split missed lone \r and let an
-  //     attacker forge headers by splitting markdown at \r but not in JS
-  //   · normalise fullwidth `＃` (U+FF03) and small `﹟` (U+FE5F) to ASCII
-  //     `#` so an attacker can't slip a header past the regex
-  let text = String(s ?? '')
-    .replace(/\0/g, '')
-    .replace(/\r\n?/g, '\n')
-    .replace(/[＃﹟]/g, '#');
-
-  // Step 2 — ATX header defang in EVERY block-leading position. Markdown
-  // recognises `## X` as a header not only at the document top but also:
-  //   · inside (nested) blockquotes:  `> # X`,  `>> # X`
-  //   · inside list items:            `- # X`,  `* # X`,  `+ # X`,  `1. # X`
-  //   · with up to 3 leading spaces/tabs
-  // The capture preserves the prefix verbatim and inserts `\` only before
-  // the `#` run. The `m` flag makes `^` fire at every line start.
-  text = text.replace(
-    /^([ \t]{0,3}(?:>[ \t]*)*(?:[-*+][ \t]+|\d+\.[ \t]+)?[ \t]*)(#+)/gm,
-    '$1\\$2',
-  );
-
-  // Step 3 — line-by-line: setext underlines + HTML block defang.
-  text = text
-    .split('\n')
-    .map((line) => {
-      // Setext: pure `=` (≥1) or pure `-` (≥1) line. CommonMark §4.3 allows
-      // a single character — earlier sanitisers required ≥2 which left the
-      // n=1 case exploitable (QA round 4 catch).
-      if (/^[ \t]*=+[ \t]*$/.test(line)) return line.replace(/=/g, '·');
-      if (/^[ \t]*-+[ \t]*$/.test(line)) return line.replace(/-/g, '·');
-      // Defensive HTML defang: escape leading `<` so a stray `<h1>` block
-      // isn't picked up by a markdown→HTML renderer downstream. Cheap
-      // insurance; today's prompt pipeline reads text not HTML.
-      if (/^[ \t]*</.test(line)) return line.replace(/</g, '\\<');
-      return line;
-    })
-    .join('\n');
-
-  // Step 4 — fence escape: replace any triple+ backtick run (anywhere on
-  // any line, not only line-leading) with a U+02CB run of the same length
-  // so the surrounding ```handoff-answers fence holds even if the user
-  // tries to close it early.
-  text = text.replace(/`{3,}/g, (m) => 'ˋ'.repeat(m.length));
-
-  return text.slice(0, max);
-}
+// Markdown defang lives in `../sanitize.ts` so the exact same logic
+// applies to renderSystemPrompt, ask RAG hits, council briefs, etc.
+// Local alias for readability — `sanitiseHandoffText` was the original
+// name 6 rounds of QA chased.
+const sanitiseHandoffText = sanitisePromptText;
 
 /* --------------------------------------------------------------- */
 /* Tool dispatch                                                   */
@@ -309,7 +242,7 @@ async function start(args: HandoffArgs): Promise<ToolReply> {
       sourceFile = args.questionsFile;
       source = 'file';
     } catch (e) {
-      return errorReply(`Could not read questions file: ${args.questionsFile} (${(e as Error).message})`);
+      return errorReply(`Could not read questions file: ${sanitisePromptLine(args.questionsFile ?? '', 500)} (${sanitisePromptLine((e as Error).message, 500)})`);
     }
     if (questions.length < limit) {
       const need = limit - questions.length;
@@ -352,7 +285,9 @@ async function start(args: HandoffArgs): Promise<ToolReply> {
   lines.push('');
   lines.push('## 질문 목록');
   for (const q of session.questions) {
-    lines.push(`  [${q.id}] ${q.question}`);
+    // q.question may carry attacker-controlled text via `autoQuestions` /
+    // `questionsFile`. Sanitise as single line before echoing to Claude.
+    lines.push(`  [${q.id}] ${sanitisePromptText(q.question, 2_000).replace(/\n/g, ' ')}`);
   }
   lines.push('');
   lines.push('다음 단계: action=review 로 reviews 배열을 전달하세요.');
@@ -378,11 +313,11 @@ async function review(args: HandoffArgs): Promise<ToolReply> {
   for (const r of args.reviews) {
     const i = idx.get(r.id);
     if (i === undefined) {
-      return errorReply(`Question id "${r.id}" not in this handoff session.`);
+      return errorReply(`Question id "${sanitisePromptLine(r.id, 128)}" not in this handoff session.`);
     }
     const q = session.questions[i];
     if (r.action === 'edit' && !r.userAnswer) {
-      return errorReply(`action=edit on "${r.id}" requires userAnswer.`);
+      return errorReply(`action=edit on "${sanitisePromptLine(r.id, 128)}" requires userAnswer.`);
     }
     q.status = r.action === 'keep' ? 'kept' : r.action === 'edit' ? 'edited' : 'declined';
     q.userAnswer = r.userAnswer;
@@ -443,9 +378,13 @@ async function status(slug: string): Promise<ToolReply> {
       : q.status === 'kept' ? '✓'
       : q.status === 'edited' ? '✎'
       : '✗';
-    lines.push(`  ${tag} [${q.id}] ${q.question}`);
+    // Both q.question and q.userAnswer are user-supplied and stored RAW
+    // in handoff.json. Sanitise as single line so a poisoned answer can't
+    // forge a `## OVERRIDE` header in the status output.
+    lines.push(`  ${tag} [${q.id}] ${sanitisePromptText(q.question, 2_000).replace(/\n/g, ' ')}`);
     if (q.userAnswer && q.status === 'edited') {
-      lines.push(`      ↳ ${q.userAnswer.length > 120 ? q.userAnswer.slice(0, 117) + '…' : q.userAnswer}`);
+      const ans = sanitisePromptText(q.userAnswer, 4_000).replace(/\n/g, ' ');
+      lines.push(`      ↳ ${ans.length > 120 ? ans.slice(0, 117) + '…' : ans}`);
     }
   }
   return { content: [{ type: 'text', text: lines.join('\n') }] };
@@ -529,14 +468,17 @@ async function finalize(args: HandoffArgs): Promise<ToolReply> {
   await snapshotPersona(args.slug, 'handoff finalize (post)');
 
   session.finalizedAt = new Date().toISOString();
-  session.signer = args.signer;
+  // r.signer is the sanitised value from signConsent — args.signer is raw.
+  // Both handoff.json and the audit/history records should hold the clean
+  // version so downstream readers don't have to remember to defang.
+  session.signer = r.signer;
   await writeHandoff(args.slug, session);
-  await appendHistory(args.slug, `handoff finalized by ${args.signer} (kept ${tally.kept} · edited ${tally.edited} · declined ${tally.declined})`);
+  await appendHistory(args.slug, `handoff finalized by ${r.signer} (kept ${tally.kept} · edited ${tally.edited} · declined ${tally.declined})`);
   await auditAppend({
     tool: 'afterglow_handoff',
     slug: args.slug,
-    summary: `handoff finalize · ${args.signer}`,
-    meta: { tally, signer: args.signer, signPartial: !!args.signPartial, previousStatus: r.previousStatus },
+    summary: `handoff finalize · ${r.signer}`,
+    meta: { tally, signer: r.signer, signPartial: !!args.signPartial, previousStatus: r.previousStatus },
   });
 
   return {
@@ -545,7 +487,9 @@ async function finalize(args: HandoffArgs): Promise<ToolReply> {
         type: 'text',
         text:
           `✦ handoff 완료. ${args.slug} 가 ${r.previousStatus} → active 로 전환됐어요.\n` +
-          `  서명자:  ${args.signer}\n` +
+          // r.signer is the sanitised value (signConsent stripped CR/LF) —
+          // safe to echo. args.signer would be raw.
+          `  서명자:  ${sanitisePromptLine(r.signer, 200)}\n` +
           `  시각:    ${session.finalizedAt}\n` +
           `  통계:    kept ${tally.kept} · edited ${tally.edited} · declined ${tally.declined}` +
           (tally.pending > 0 ? ` · pending ${tally.pending} (--sign-partial)` : '') + '\n\n' +

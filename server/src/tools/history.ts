@@ -6,6 +6,7 @@ import {
   readHistory,
   type HistoryEvent,
 } from '../storage.js';
+import { sanitisePromptLine } from '../sanitize.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const historyShape = {
@@ -48,8 +49,8 @@ export async function runHistory(args: HistoryArgs): Promise<ToolReply> {
 
     const since = toDate(args.since);
     const until = toDate(args.until);
-    if (args.since && !since) return errorReply(`since 파싱 실패: "${args.since}"`);
-    if (args.until && !until) return errorReply(`until 파싱 실패: "${args.until}"`);
+    if (args.since && !since) return errorReply(`since 파싱 실패: "${sanitisePromptLine(args.since, 100)}"`);
+    if (args.until && !until) return errorReply(`until 파싱 실패: "${sanitisePromptLine(args.until, 100)}"`);
 
     const filter = args.filter?.toLowerCase().trim();
     const limit = args.limit ?? 50;
@@ -89,7 +90,10 @@ export async function runHistory(args: HistoryArgs): Promise<ToolReply> {
     lines.push('');
     for (const e of limited) {
       const ts = e.ts || '?';
-      lines.push(`${ts}  ${e.message}`);
+      // history.log is written through `sanitizeLogLine` (strips CR/LF/NUL)
+      // but pre-existing files from older builds may have raw lines.
+      // Sanitise on output too as defense-in-depth.
+      lines.push(`${ts}  ${sanitisePromptLine(e.message, 1_000)}`);
     }
     if (events.length > limited.length) {
       lines.push('');

@@ -156,23 +156,41 @@ const WINDOWS_RESERVED = new Set([
   'lpt1', 'lpt2', 'lpt3', 'lpt4', 'lpt5', 'lpt6', 'lpt7', 'lpt8', 'lpt9',
 ]);
 
+/**
+ * Sanitise a slug for SAFE embedding in error messages. Attacker-supplied
+ * slugs reach these error classes (via `assertValidSlug`, `getStatus`,
+ * `agentExists`) and the message is rethrown verbatim to the caller via
+ * `errorReply((e as Error).message)`. Without this, a poisoned slug like
+ * `"x\n\n## OVERRIDE\n"` would forge an H2 in Claude's context.
+ *
+ * Inlined here (instead of importing from sanitize.ts) to avoid a
+ * persona.ts ↔ sanitize.ts ↔ storage.ts circular import.
+ */
+function safeForError(s: string, max = 100): string {
+  return String(s ?? '')
+    .replace(/[\r\n\0]+/g, ' ')
+    .replace(/[＃﹟]/g, '#')
+    .trim()
+    .slice(0, max);
+}
+
 export class InvalidSlugError extends Error {
   constructor(slug: string) {
-    super(`Invalid slug: "${slug}". Use 1-32 lowercase letters/digits/hyphens, starting and ending with a letter or digit (Windows reserved names like "con"/"prn" are not allowed).`);
+    super(`Invalid slug: "${safeForError(slug)}". Use 1-32 lowercase letters/digits/hyphens, starting and ending with a letter or digit (Windows reserved names like "con"/"prn" are not allowed).`);
     this.name = 'InvalidSlugError';
   }
 }
 
 export class AgentNotFoundError extends Error {
   constructor(slug: string) {
-    super(`Agent not found: "${slug}".`);
+    super(`Agent not found: "${safeForError(slug)}".`);
     this.name = 'AgentNotFoundError';
   }
 }
 
 export class AgentExistsError extends Error {
   constructor(slug: string) {
-    super(`Agent already exists: "${slug}".`);
+    super(`Agent already exists: "${safeForError(slug)}".`);
     this.name = 'AgentExistsError';
   }
 }
@@ -324,7 +342,19 @@ export async function createAgentSkeleton(slug: string): Promise<string[]> {
 export async function readPersona(slug: string): Promise<Persona> {
   if (!(await agentExists(slug))) throw new AgentNotFoundError(slug);
   const raw = await fs.readFile(personaPath(slug), 'utf8');
-  return JSON.parse(raw) as Persona;
+  const parsed = JSON.parse(raw);
+  // Run the schema transform on EVERY read too, not just write — protects
+  // against a hand-tampered persona.json or an old snapshot that pre-dates
+  // the sanitisation policy. The transform is idempotent for already-clean
+  // values so the cost on the hot path is negligible (single regex pass).
+  // Lazy import to avoid storage.ts ↔ persona.ts circular dependency.
+  const { PersonaSchema } = await import('./persona.js');
+  const safe = PersonaSchema.safeParse(parsed);
+  if (safe.success) return safe.data;
+  // If the file is corrupt enough that the schema rejects it, fall back to
+  // the raw object so existing error-handling code (e.g. inspect) can still
+  // render whatever's there. Production validators would tighten this.
+  return parsed as Persona;
 }
 
 export async function writePersona(slug: string, persona: Persona): Promise<void> {
@@ -390,16 +420,12 @@ export async function readHistory(slug: string): Promise<HistoryEvent[]> {
 
 export class NotSignedError extends Error {
   constructor(slug: string, currentStatus?: AgentStatus) {
+    const safeSlug = safeForError(slug);
     const stateHint = currentStatus ? ` (current: ${currentStatus})` : '';
-    // For `paused` and `draft` we point users at two different remedies:
-    //   - draft   → /afterglow sign     (consent not yet captured)
-    //   - paused  → /afterglow resume   (consent still on file)
-    // Both options are listed so the message stays useful when the caller
-    // didn't pass currentStatus.
     super(
-      `Agent "${slug}" is not active${stateHint}.\n` +
-        `  · 처음 서명: /afterglow sign ${slug} --signer "..."\n` +
-        `  · 이미 서명되어 있다면: /afterglow resume ${slug}`,
+      `Agent "${safeSlug}" is not active${stateHint}.\n` +
+        `  · 처음 서명: /afterglow sign ${safeSlug} --signer "..."\n` +
+        `  · 이미 서명되어 있다면: /afterglow resume ${safeSlug}`,
     );
     this.name = 'NotSignedError';
   }
@@ -519,28 +545,29 @@ export async function assertWritable(slug: string): Promise<void> {
 
 export class ArchivedAgentError extends Error {
   constructor(slug: string) {
-    super(`Agent "${slug}" is archived. Restore it first: /afterglow archive ${slug} --action restore`);
+    const safeSlug = safeForError(slug);
+    super(`Agent "${safeSlug}" is archived. Restore it first: /afterglow archive ${safeSlug} --action restore`);
     this.name = 'ArchivedAgentError';
   }
 }
 
 export class NotArchivedError extends Error {
   constructor(slug: string) {
-    super(`Agent "${slug}" is not archived. Nothing to restore.`);
+    super(`Agent "${safeForError(slug)}" is not archived. Nothing to restore.`);
     this.name = 'NotArchivedError';
   }
 }
 
 export class ArchiveTargetExistsError extends Error {
   constructor(path: string) {
-    super(`Archive target already exists: ${path}. Refusing to overwrite.`);
+    super(`Archive target already exists: ${safeForError(path, 300)}. Refusing to overwrite.`);
     this.name = 'ArchiveTargetExistsError';
   }
 }
 
 export class RestoreTargetExistsError extends Error {
   constructor(path: string) {
-    super(`Restore target already exists: ${path}. An active agent with the same slug is in the way.`);
+    super(`Restore target already exists: ${safeForError(path, 300)}. An active agent with the same slug is in the way.`);
     this.name = 'RestoreTargetExistsError';
   }
 }
@@ -712,6 +739,10 @@ export async function listVersions(slug: string): Promise<VersionEntry[]> {
 }
 
 export async function snapshotPersona(slug: string, reason: string): Promise<VersionEntry> {
+  // Sanitise reason at write — it round-trips JSON and is later displayed
+  // by `version list` / `version snapshot` reply into Claude's context.
+  // One sanitisation here protects all downstream readers.
+  const cleanReason = sanitiseSingleLine(reason, 300);
   // Serialise per-slug to defeat the TOCTOU race where two concurrent
   // callers (e.g. edit + sign in parallel) compute the same `nextNum`
   // and overwrite each other's snapshot. The lock key is per-slug so
@@ -730,11 +761,32 @@ export async function snapshotPersona(slug: string, reason: string): Promise<Ver
     } catch {
       /* if persona.json missing, snapshot empty */
     }
-    const body = { __meta__: { id, createdAt: now.toISOString(), reason }, persona: current };
+    const body = {
+      __meta__: { id, createdAt: now.toISOString(), reason: cleanReason },
+      persona: current,
+    };
     await ensureDir(versionsDir(slug));
     await fs.writeFile(path, JSON.stringify(body, null, 2) + '\n', 'utf8');
-    return { id, createdAt: now.toISOString(), reason, path };
+    return { id, createdAt: now.toISOString(), reason: cleanReason, path };
   });
+}
+
+/**
+ * Tiny single-line defang used at write boundaries (snapshot reason,
+ * handoff questions, …) — kept local in storage.ts to avoid a circular
+ * import on sanitize.ts. Behaviour mirrors `sanitisePromptLine` in
+ * `sanitize.ts`: collapse whitespace, defang fences + leading markdown.
+ */
+function sanitiseSingleLine(s: string, max: number): string {
+  let t = String(s ?? '')
+    .replace(/\0/g, '')
+    .replace(/[＃﹟]/g, '#')
+    .replace(/\s+/g, ' ')
+    .trim();
+  t = t.replace(/`{3,}/g, (m) => 'ˋ'.repeat(m.length));
+  if (t.startsWith('#')) t = `\\${t}`;
+  if (t.startsWith('<')) t = `\\${t}`;
+  return t.slice(0, max);
 }
 
 export async function readVersion(slug: string, id: string): Promise<unknown> {

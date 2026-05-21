@@ -10,6 +10,7 @@ import {
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { append as auditAppend } from '../audit.js';
+import { sanitisePromptLine, sanitisePromptText } from '../sanitize.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const inspectShape = {
@@ -86,11 +87,20 @@ export async function runInspect(args: InspectArgs): Promise<ToolReply> {
     : status === 'archived' ? '▣ archived'
     : status === 'learning' ? '◐ learning'
     : '□ draft';
+  // Sanitise every user-controlled field before emitting. An orchestrator
+  // Claude that calls `inspect` to verify an agent before delegating to it
+  // would otherwise read attacker-controlled markdown from persona.json
+  // directly into its own context. Same defense-in-depth story as ask /
+  // council — the rendered output is data, not instructions.
+  const safeName = sanitisePromptLine(persona.name, 200);
+  const safeRole = sanitisePromptLine(persona.role, 200);
+  const safeTenure = persona.tenure ? sanitisePromptLine(persona.tenure, 200) : '';
+  const safeBio = persona.bio ? sanitisePromptText(persona.bio, 20_000) : '';
   const lines: string[] = [];
-  lines.push(`╭─ ${persona.slug}  ──  ${persona.name} (✦)  ${statusDot} ${'─'.repeat(Math.max(2, 18))}╮`);
-  lines.push(`   ${persona.role}`);
-  if (persona.tenure) lines.push(`   재직 기간   ${persona.tenure}`);
-  if (persona.bio) lines.push(`   소개        ${persona.bio}`);
+  lines.push(`╭─ ${persona.slug}  ──  ${safeName} (✦)  ${statusDot} ${'─'.repeat(Math.max(2, 18))}╮`);
+  lines.push(`   ${safeRole}`);
+  if (safeTenure) lines.push(`   재직 기간   ${safeTenure}`);
+  if (safeBio) lines.push(`   소개        ${safeBio}`);
   lines.push(`   상태        ${statusDot}`);
   lines.push('');
   lines.push(`   ├─ 톤 ${'─'.repeat(56)}┤`);
@@ -110,14 +120,16 @@ export async function runInspect(args: InspectArgs): Promise<ToolReply> {
     lines.push(`   (자료 없음 — /afterglow edit ${persona.slug} --add-source <path>)`);
   } else {
     for (const s of persona.sources) {
-      lines.push(`   • [${s.kind}] ${s.label ?? s.location}`);
+      lines.push(`   • [${s.kind}] ${sanitisePromptLine(s.label ?? s.location, 500)}`);
     }
   }
   lines.push(`   knowledge/ 파일 ${knowledgeCount}개`);
   lines.push('');
   lines.push(`   ├─ MCP 권한 ${'─'.repeat(50)}┤`);
-  lines.push(`   허용: ${persona.mcpAllow.join(', ') || '(없음)'}`);
-  if (persona.mcpDeny.length > 0) lines.push(`   거부: ${persona.mcpDeny.join(', ')}`);
+  const safeAllow = persona.mcpAllow.map((m) => sanitisePromptLine(m, 200)).filter((m) => m.length > 0);
+  const safeDeny = persona.mcpDeny.map((m) => sanitisePromptLine(m, 200)).filter((m) => m.length > 0);
+  lines.push(`   허용: ${safeAllow.join(', ') || '(없음)'}`);
+  if (safeDeny.length > 0) lines.push(`   거부: ${safeDeny.join(', ')}`);
   lines.push('');
   lines.push(`   ├─ 폴더 ${'─'.repeat(54)}┤`);
   lines.push(`   ${agentDir(persona.slug)}`);

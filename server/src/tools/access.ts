@@ -9,7 +9,11 @@ import {
   writeAccess,
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
+import { sanitisePromptLine } from '../sanitize.js';
 import { errorReply, safe, type ToolReply } from './types.js';
+
+// Mirrors the CALLER_PATTERN in ask.ts — both treat caller spec identically.
+const CALLER_PATTERN = /^(user|role|team):[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 export const accessShape = {
   action: z
@@ -51,7 +55,7 @@ function validateRule(rule: string | undefined): string | null {
   if (!rule) return null;
   return RULE_PATTERN.test(rule.trim())
     ? null
-    : `Invalid rule "${rule}". Expected "user:<id>", "role:<id>", or "team:<id>" (1-64 ASCII alnum / "-" / "_", starting with alnum).`;
+    : `Invalid rule "${sanitisePromptLine(rule, 80)}". Expected "user:<id>", "role:<id>", or "team:<id>" (1-64 ASCII alnum / "-" / "_", starting with alnum).`;
 }
 
 export async function runAccess(args: AccessArgs): Promise<ToolReply> {
@@ -155,7 +159,7 @@ async function remove(slug: string, rule: string | undefined): Promise<ToolReply
   policy.deny = policy.deny.filter((r) => r !== rule);
   const removed = beforeAllow - policy.allow.length + beforeDeny - policy.deny.length;
   if (removed === 0) {
-    return { content: [{ type: 'text', text: `(no match) "${rule}" 는 어느 목록에도 없었어요.` }] };
+    return { content: [{ type: 'text', text: `(no match) "${sanitisePromptLine(rule, 80)}" 는 어느 목록에도 없었어요.` }] };
   }
   await writeAccess(slug, policy);
   await appendHistory(slug, `access remove ${rule}`);
@@ -187,13 +191,28 @@ async function setDefault(slug: string, policyKind: 'allow' | 'deny' | undefined
 }
 
 async function check(slug: string, caller: string | undefined): Promise<ToolReply> {
+  // Validate caller spec syntax (same shape as ask.ts) so an attacker can't
+  // smuggle `\n## OVERRIDE` into the echoed reply line. Anonymous (undefined)
+  // is allowed — that's a normal simulation case.
+  if (caller && !CALLER_PATTERN.test(caller)) {
+    return errorReply(
+      `Invalid caller "${sanitisePromptLine(caller, 80)}". Expected "user:<id>", "role:<id>", or "team:<id>" (1-64 ASCII alnum / "-" / "_", starting with alnum).`,
+    );
+  }
   const policy = await readAccess(slug);
   const r = evaluateAccess(policy, caller);
+  // Sanitise everything echoed back — caller passed the regex above so this
+  // is belt-and-suspenders; r.reason / r.matchedRule come from policy data
+  // which was already sanitised at write time by validateRule, but defend
+  // in depth.
+  const safeCaller = sanitisePromptLine(caller || '(anonymous)', 80);
+  const safeReason = sanitisePromptLine(r.reason, 200);
+  const safeMatched = r.matchedRule ? sanitisePromptLine(r.matchedRule, 80) : '';
   return {
     content: [
       {
         type: 'text',
-        text: `caller "${caller || '(anonymous)'}" → ${r.allowed ? '✓ allow' : '✗ deny'}  ·  ${r.reason}${r.matchedRule ? `  (matched: ${r.matchedRule})` : ''}`,
+        text: `caller "${safeCaller}" → ${r.allowed ? '✓ allow' : '✗ deny'}  ·  ${safeReason}${safeMatched ? `  (matched: ${safeMatched})` : ''}`,
       },
     ],
   };

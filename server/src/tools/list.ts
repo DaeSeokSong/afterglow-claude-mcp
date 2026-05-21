@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { readRegistry, assertInitialized } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
+import { sanitisePromptLine } from '../sanitize.js';
 import { safe, type ToolReply } from './types.js';
 
 export const listShape = {
@@ -49,10 +50,19 @@ export async function runList(args: ListArgs): Promise<ToolReply> {
     return { content: [{ type: 'text', text: msg }] };
   }
 
-  // Render a simple monospace table.
-  const slugW = Math.max(5, ...filtered.map((a) => a.slug.length));
-  const nameW = Math.max(5, ...filtered.map((a) => a.name.length));
-  const roleW = Math.max(5, ...filtered.map((a) => a.role.length));
+  // Render a simple monospace table. Names + roles read raw from
+  // registry.json which mirrors persona.json — both are user-controlled
+  // at create/edit time. Sanitise per cell so a malicious `name =
+  // "X\n## OVERRIDE\n"` can't forge a header line in the table output
+  // when an orchestrator Claude reads this back.
+  const safeRows = filtered.map((a) => ({
+    ...a,
+    name: sanitisePromptLine(a.name, 100),
+    role: sanitisePromptLine(a.role, 100),
+  }));
+  const slugW = Math.max(5, ...safeRows.map((a) => a.slug.length));
+  const nameW = Math.max(5, ...safeRows.map((a) => a.name.length));
+  const roleW = Math.max(5, ...safeRows.map((a) => a.role.length));
 
   const rows: string[] = [];
   rows.push(
@@ -61,7 +71,7 @@ export async function runList(args: ListArgs): Promise<ToolReply> {
   rows.push(
     `${'-'.repeat(slugW)}  ${'-'.repeat(nameW)}  ${'-'.repeat(roleW)}  --------  -------`,
   );
-  for (const a of filtered) {
+  for (const a of safeRows) {
     const dot =
       a.status === 'active' ? '●'
       : a.status === 'learning' ? '◐'

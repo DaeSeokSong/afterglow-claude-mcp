@@ -9,6 +9,7 @@ import {
   restoreAgent,
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
+import { sanitisePromptLine } from '../sanitize.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const archiveShape = {
@@ -56,7 +57,12 @@ export async function runArchive(args: ArchiveArgs): Promise<ToolReply> {
         lines.push('');
         for (const s of slugs) {
           const entry = reg.agents.find((a) => a.slug === s);
-          const role = entry?.role ?? '(registry에 없음 — 직접 복원 필요)';
+          // role reads RAW from registry — sanitise as single line so a
+          // poisoned `role = "HR\n## OVERRIDE"` can't forge a header
+          // when an orchestrator Claude reads the archive list.
+          const role = entry?.role
+            ? sanitisePromptLine(entry.role, 200)
+            : '(registry에 없음 — 직접 복원 필요)';
           lines.push(`  · ${s.padEnd(20)} ${role}`);
         }
         lines.push('');

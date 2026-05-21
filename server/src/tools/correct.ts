@@ -9,6 +9,7 @@ import {
   type CorrectionEntry,
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
+import { sanitisePromptLine } from '../sanitize.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 // recordIds end up embedded in log lines + the corrections.log parser splits
@@ -76,7 +77,7 @@ export async function runCorrect(args: CorrectArgs): Promise<ToolReply> {
     // recordId validation applies to all write actions that take it.
     if (args.recordId && !RECORD_ID_PATTERN.test(args.recordId)) {
       return errorReply(
-        `Invalid recordId "${args.recordId}". Use 1-128 chars: ASCII alnum / "-" / "_" / "." / ":", starting with alnum.`,
+        `Invalid recordId "${sanitisePromptLine(args.recordId, 128)}". Use 1-128 chars: ASCII alnum / "-" / "_" / "." / ":", starting with alnum.`,
       );
     }
     switch (args.action) {
@@ -101,7 +102,10 @@ async function feedback(args: CorrectArgs): Promise<ToolReply> {
     ts: new Date().toISOString(),
     recordId: args.recordId,
     kind: 'feedback',
-    note: args.feedback.trim(),
+    // Sanitise at write — corrections.log is read by ask.ts (system-prompt
+    // context) and by `list` (Claude-visible). One sanitisation at the
+    // boundary protects all downstream readers.
+    note: sanitisePromptLine(args.feedback.trim(), 2_000),
   };
   await appendCorrection(args.slug, entry);
   await appendHistory(args.slug, `correct feedback record=${args.recordId} "${truncate(args.feedback, 60)}"`);
@@ -117,7 +121,7 @@ async function feedback(args: CorrectArgs): Promise<ToolReply> {
         type: 'text',
         text:
           `✓ ${args.slug} 에 피드백 기록 (${args.recordId}).\n` +
-          `  "${truncate(args.feedback, 120)}"\n\n` +
+          `  "${sanitisePromptLine(truncate(args.feedback, 120), 200)}"\n\n` +
           `피드백은 corrections.log + history.log + audit 에 누적돼서 사람이 검수할 때 참고합니다. ` +
           `에이전트 답변에 자동 반영하려면 \`edit-answer\` (사용자 정답으로 교체) 또는 \`save-rule\` ` +
           `(패턴→적용 규칙) 을 쓰세요 — 이 둘만 다음 ask 부터 RAG 보다 우선 인용됩니다.`,
@@ -135,7 +139,9 @@ async function editAnswer(args: CorrectArgs): Promise<ToolReply> {
     ts: new Date().toISOString(),
     recordId: args.recordId,
     kind: 'edit-answer',
-    note: args.newAnswer.replace(/\n/g, ' \\n ').trim(),
+    // Sanitise + collapse newlines at write — ask.ts surfaces this inside
+    // the ```corrections fence + an orchestrator may see it via `list`.
+    note: sanitisePromptLine(args.newAnswer.trim(), 4_000),
   };
   await appendCorrection(args.slug, entry);
   await appendHistory(
@@ -168,7 +174,7 @@ async function saveRule(args: CorrectArgs): Promise<ToolReply> {
     ts: new Date().toISOString(),
     recordId: args.recordId ?? 'rule',
     kind: 'save-rule',
-    note: args.rule.replace(/\n/g, ' \\n ').trim(),
+    note: sanitisePromptLine(args.rule.trim(), 2_000),
   };
   await appendCorrection(args.slug, entry);
   await appendHistory(args.slug, `correct save-rule "${truncate(args.rule, 60)}"`);
@@ -196,8 +202,10 @@ async function listAction(slug: string, limit: number): Promise<ToolReply> {
   lines.push('');
   for (const e of shown) {
     const tag = e.kind === 'feedback' ? '💬' : e.kind === 'edit-answer' ? '✎' : '📌';
-    lines.push(`${tag} ${e.ts}  record=${e.recordId}`);
-    lines.push(`    ${truncate(e.note, 200)}`);
+    lines.push(`${tag} ${e.ts}  record=${sanitisePromptLine(e.recordId, 128)}`);
+    // Notes are user-authored — sanitise so listings don't carry a forged
+    // header into an orchestrator Claude's context.
+    lines.push(`    ${sanitisePromptLine(truncate(e.note, 200), 300)}`);
   }
   return { content: [{ type: 'text', text: lines.join('\n') }] };
 }

@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import { basename, join } from 'node:path';
 import { assertInitialized, councilsDir } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
+import { sanitisePromptLine } from '../sanitize.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const councilSummaryShape = {
@@ -220,10 +221,16 @@ export async function runCouncilSummary(args: CouncilSummaryArgs): Promise<ToolR
     if (filename) {
       // Reject path-traversal attempts up front. basename also drops any
       // leading directory components so a malicious "../../audit" can only
-      // resolve to "audit.md" inside councils/.
-      if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+      // resolve to "audit.md" inside councils/. Newlines also rejected so
+      // an attacker can't smuggle a forged header through error replies.
+      if (
+        filename.includes('/') ||
+        filename.includes('\\') ||
+        filename.includes('..') ||
+        /[\r\n]/.test(filename)
+      ) {
         return errorReply(
-          `file 인자에 경로 구분자가 포함될 수 없어요: "${filename}". councils/ 안의 파일명만 주세요.`,
+          `file 인자에 경로 구분자/줄바꿈이 포함될 수 없어요: "${sanitisePromptLine(filename, 200)}". councils/ 안의 파일명만 주세요.`,
         );
       }
       filename = basename(filename);

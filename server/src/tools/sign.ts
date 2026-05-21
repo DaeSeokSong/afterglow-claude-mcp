@@ -8,6 +8,7 @@ import {
   snapshotPersona,
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
+import { sanitisePromptLine } from '../sanitize.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const signShape = {
@@ -69,7 +70,11 @@ export async function runSign(args: SignArgs): Promise<ToolReply> {
       `  서명자: ${r.signer}`,
       `  시각:   ${r.signedAt}`,
     ];
-    if (args.note) lines.push(`  메모:   ${args.note}`);
+    // `args.note` is the raw input — `signConsent` only sanitised the
+    // version it wrote to consent.md. Sanitise here too so the tool reply
+    // can't carry a forged `## OVERRIDE` header into an orchestrator's
+    // context (`signConsent` already stripped CR/LF for the disk write).
+    if (args.note) lines.push(`  메모:   ${sanitisePromptLine(args.note, 1_000)}`);
     if (r.previousStatus === 'active') {
       lines.push('');
       lines.push('(주의) 이미 active 상태였어요. 추가 서명 블록만 consent.md 에 append 됐어요.');

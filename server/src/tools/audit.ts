@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { assertInitialized } from '../storage.js';
 import { readAll, verifyChain, type AuditRecord } from '../audit.js';
+import { sanitisePromptLine } from '../sanitize.js';
 import { safe, type ToolReply } from './types.js';
 
 export const auditShape = {
@@ -88,7 +89,12 @@ export async function runAudit(args: AuditArgs): Promise<ToolReply> {
       for (const r of shown) {
         const head = `#${r.seq.toString().padStart(4)}  ${r.ts}  ${r.tool}${r.slug ? ` (${r.slug})` : ''}`;
         lines.push(head);
-        lines.push(`        ${r.summary}`);
+        // r.summary may carry caller-controlled fragments (questions,
+        // signers, …). Most are sanitised at call-site now, but legacy
+        // entries from older builds or unverified callers can still hold
+        // newlines that would forge a header at column 0 once the
+        // 8-space indent is consumed. sanitisePromptLine collapses them.
+        lines.push(`        ${sanitisePromptLine(r.summary, 500)}`);
         lines.push(`        hash=${r.hash.slice(0, 12)}…  prev=${r.prev === 'GENESIS' ? 'GENESIS' : r.prev.slice(0, 12) + '…'}`);
       }
     }

@@ -13,6 +13,7 @@ import {
   tagVersion,
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
+import { sanitisePromptLine } from '../sanitize.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 /**
@@ -97,15 +98,15 @@ export async function runVersion(args: VersionArgs): Promise<ToolReply> {
         const tags = await listVersionTags(args.slug);
         const resolved = tags[versionA];
         if (!resolved) {
-          return errorReply(`tag "${versionA}" 를 못 찾았어요. /afterglow version list 로 태그 목록을 확인하세요.`);
+          return errorReply(`tag "${sanitisePromptLine(versionA, 80)}" 를 못 찾았어요. /afterglow version list 로 태그 목록을 확인하세요.`);
         }
         versionA = resolved;
       } else {
-        return errorReply(`versionA "${versionA}" 형식 오류. "v1".."v999999999" 사용.`);
+        return errorReply(`versionA "${sanitisePromptLine(versionA, 80)}" 형식 오류. "v1".."v999999999" 사용.`);
       }
     }
     if (args.versionB && !VERSION_ID_PATTERN.test(args.versionB)) {
-      return errorReply(`versionB "${args.versionB}" 형식 오류. "v1".."v999999999" 사용.`);
+      return errorReply(`versionB "${sanitisePromptLine(args.versionB, 80)}" 형식 오류. "v1".."v999999999" 사용.`);
     }
     switch (args.action) {
       case 'list':
@@ -152,7 +153,12 @@ async function listAction(slug: string, limit: number): Promise<ToolReply> {
   lines.push('');
   for (const v of shown) {
     const tagsForV = (reverseTags.get(v.id) ?? []).map((t) => `🏷 ${t}`).join('  ');
-    lines.push(`  ${v.id.padEnd(6)} ${v.createdAt}  ${v.reason}  ${tagsForV}`);
+    // v.reason originates from caller-supplied input (snapshot --reason "…")
+    // and round-trips JSON. Sanitise as single line so a poisoned reason
+    // like "X\n## OVERRIDE\n" can't forge a header in the list output.
+    lines.push(
+      `  ${v.id.padEnd(6)} ${v.createdAt}  ${sanitisePromptLine(v.reason, 300)}  ${tagsForV}`,
+    );
   }
   if (truncated) {
     lines.push('');
@@ -176,7 +182,12 @@ async function snapshotAction(slug: string, reason: string | undefined): Promise
     meta: { reason: r.reason, path: r.path },
   });
   return {
-    content: [{ type: 'text', text: `✦ ${r.id} 저장됨 (${r.reason}) · ${r.path}` }],
+    content: [
+      {
+        type: 'text',
+        text: `✦ ${r.id} 저장됨 (${sanitisePromptLine(r.reason, 300)}) · ${r.path}`,
+      },
+    ],
   };
 }
 
@@ -188,10 +199,10 @@ async function diffAction(
   if (!a) return errorReply('diff 에는 versionA 가 필요합니다 (versionB 없으면 현재 persona 와 비교).');
   const versionsList = await listVersions(slug);
   if (!versionsList.some((v) => v.id === a)) {
-    return errorReply(`버전 "${a}" 를 못 찾았어요.`);
+    return errorReply(`버전 "${sanitisePromptLine(a, 80)}" 를 못 찾았어요.`);
   }
   if (b && !versionsList.some((v) => v.id === b)) {
-    return errorReply(`버전 "${b}" 를 못 찾았어요.`);
+    return errorReply(`버전 "${sanitisePromptLine(b, 80)}" 를 못 찾았어요.`);
   }
   const target = await readVersion(slug, a);
   const compareWith = b ? await readVersion(slug, b) : await readPersona(slug);
