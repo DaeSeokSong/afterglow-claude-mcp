@@ -7,7 +7,7 @@
  *
  *   claude mcp add afterglow npx @daeseoksong/afterglow-mcp
  *
- * The server exposes 14 tools that mirror the slash commands in the design:
+ * The server exposes 18 tools that mirror the slash commands in the design:
  *   - afterglow_init             (/afterglow init)
  *   - afterglow_create           (/afterglow create <slug> …)
  *   - afterglow_list             (/afterglow list)
@@ -16,12 +16,16 @@
  *   - afterglow_edit             (/afterglow edit <slug> …)
  *   - afterglow_sign             (/afterglow sign <slug> --signer "...")
  *   - afterglow_resume           (/afterglow resume <slug>)
+ *   - afterglow_handoff          (/afterglow handoff <slug> --action start|review|status|finalize|abort)
  *   - afterglow_council          (/afterglow council <slugs...> "...")
  *   - afterglow_council_summary  (/afterglow council summary [file])
  *   - afterglow_history          (/afterglow history <slug>)
  *   - afterglow_audit            (/afterglow audit)
  *   - afterglow_recalibrate      (/afterglow recalibrate <slug> [--byTopic])
+ *   - afterglow_correct          (/afterglow correct <slug> --action feedback|edit-answer|save-rule|list)
  *   - afterglow_archive          (/afterglow archive <slug> --action archive|restore|list)
+ *   - afterglow_version          (/afterglow version <slug> --action list|diff|rollback|tag|snapshot)
+ *   - afterglow_access           (/afterglow access <slug> --action list|allow|deny|set-default|check)
  *
  * `ask` and `council` do NOT call an LLM. They return persona + RAG context
  * so Claude in the user's session can compose the actual answer.
@@ -43,6 +47,10 @@ import { recalibrateShape, runRecalibrate } from './tools/recalibrate.js';
 import { archiveShape, runArchive } from './tools/archive.js';
 import { councilSummaryShape, runCouncilSummary } from './tools/council_summary.js';
 import { resumeShape, runResume } from './tools/resume.js';
+import { handoffShape, runHandoff } from './tools/handoff.js';
+import { versionShape, runVersion } from './tools/version.js';
+import { accessShape, runAccess } from './tools/access.js';
+import { correctShape, runCorrect } from './tools/correct.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
 const SERVER_VERSION = '0.1.3';
@@ -56,7 +64,9 @@ export function buildServer(): McpServer {
     {
       instructions:
         '퇴사자 에이전트 폴더(~/.claude/afterglow/)를 관리하는 MCP 서버. ' +
-        'init → create → sign → list → inspect → ask, 그리고 edit / resume / council / council_summary / history / audit / recalibrate / archive 까지 14 개 도구로 한 사람의 폴더 단위로 페르소나·자료·권한·감사·보관을 다룹니다.',
+        'init → create → handoff(본인 인계 검수) → sign → list → inspect → ask, ' +
+        '그리고 edit / resume / council / council_summary / history / audit / recalibrate / correct / archive / version / access 까지 ' +
+        '18 개 도구로 한 사람의 폴더 단위로 페르소나·자료·권한·감사·보관·버전·본인 검수를 다룹니다.',
     },
   );
 
@@ -201,6 +211,50 @@ export function buildServer(): McpServer {
       inputSchema: archiveShape,
     },
     wrap(runArchive),
+  );
+
+  server.registerTool(
+    'afterglow_handoff',
+    {
+      title: 'Afterglow — 본인 인계 모드 (self-review onboarding)',
+      description:
+        '퇴사자 본인이 자기 에이전트의 샘플 질문을 직접 검수합니다. action=start → 질문 생성, action=review → 본인 답변 기록 (keep/edit/decline), action=status → 진행 확인, action=finalize → 본인 서명으로 active 전환, action=abort → 세션 폐기. 동료가 미리 적어둔 questions.txt 도 받을 수 있어요.',
+      inputSchema: handoffShape,
+    },
+    wrap(runHandoff),
+  );
+
+  server.registerTool(
+    'afterglow_version',
+    {
+      title: 'Afterglow — 버전 관리',
+      description:
+        'persona.json 의 버전 히스토리. action=list (모든 버전 + tag), diff (두 버전 비교 또는 한 버전 vs 현재), rollback (해당 버전으로 복원, 현재는 자동 백업), tag (stable / handoff-signed 같은 태그), snapshot (수동 백업). edit / sign / recalibrate apply / handoff finalize 시 자동 스냅샷.',
+      inputSchema: versionShape,
+    },
+    wrap(runVersion),
+  );
+
+  server.registerTool(
+    'afterglow_access',
+    {
+      title: 'Afterglow — 호출 권한 관리',
+      description:
+        'agents/<slug>/access.json 에 user: / role: / team: 단위 allow / deny 리스트와 default 정책. action=list / allow / deny / remove / set-default / check (시뮬레이션). ask 호출 시 caller 인자를 주면 자동 체크.',
+      inputSchema: accessShape,
+    },
+    wrap(runAccess),
+  );
+
+  server.registerTool(
+    'afterglow_correct',
+    {
+      title: 'Afterglow — 신뢰도 수동 보정',
+      description:
+        'ask 결과에 자연어 피드백 (action=feedback "이 부분 다시 써줘"), 답변 라인 직접 편집 (action=edit-answer), 반복 패턴을 규칙으로 저장 (action=save-rule). corrections.log + history.log + audit 에 모두 누적. action=list 로 최근 보정 확인.',
+      inputSchema: correctShape,
+    },
+    wrap(runCorrect),
   );
 
   server.registerTool(

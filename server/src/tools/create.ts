@@ -28,23 +28,26 @@ export const createShape = {
     .min(1)
     .max(32)
     .describe('짧은 식별자. 소문자/숫자/하이픈. 예: jiyoon, jaehoon, john-kim.'),
-  name: z.string().min(1).describe('실제 이름. 예: 이지윤.'),
-  role: z.string().min(1).describe('직무 / 부서. 예: 프로덕트 디자이너 · Product팀.'),
-  tenure: z.string().optional().describe('재직 기간. 예: 2019.03 – 2025.11.'),
-  bio: z.string().optional().describe('한 줄 소개.'),
+  name: z.string().min(1).max(200).describe('실제 이름. 예: 이지윤.'),
+  role: z.string().min(1).max(200).describe('직무 / 부서. 예: 프로덕트 디자이너 · Product팀.'),
+  tenure: z.string().max(200).optional().describe('재직 기간. 예: 2019.03 – 2025.11.'),
+  bio: z.string().max(20_000).optional().describe('한 줄 소개. 최대 20000자.'),
   expertise: z
     .array(ExpertiseSchema)
+    .max(20)
     .optional()
     .describe('자신있는 카테고리(다중). 디자인/개발/연구/사업화/영업/마케팅/운영/인사/법무/재무/데이터.'),
   sources: z
-    .array(z.string())
+    .array(z.string().max(2_000))
+    .max(200)
     .optional()
-    .describe('학습 자료의 파일 경로 또는 URL 목록.'),
+    .describe('학습 자료의 파일 경로 또는 URL 목록 (각 항목 2000자 / 최대 200개).'),
   mcpAllow: z
-    .array(z.string())
+    .array(z.string().max(200))
+    .max(50)
     .optional()
     .describe('이 에이전트가 호출할 수 있는 MCP. 기본 [filesystem].'),
-  mcpDeny: z.array(z.string()).optional().describe('명시적으로 거부할 MCP.'),
+  mcpDeny: z.array(z.string().max(200)).max(50).optional().describe('명시적으로 거부할 MCP.'),
 } as const;
 
 export interface CreateArgs {

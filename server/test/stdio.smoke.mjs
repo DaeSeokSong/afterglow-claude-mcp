@@ -72,13 +72,16 @@ function assertOk(label, reply) {
 }
 
 const EXPECTED_TOOLS = [
+  'afterglow_access',
   'afterglow_archive',
   'afterglow_ask',
   'afterglow_audit',
+  'afterglow_correct',
   'afterglow_council',
   'afterglow_council_summary',
   'afterglow_create',
   'afterglow_edit',
+  'afterglow_handoff',
   'afterglow_history',
   'afterglow_init',
   'afterglow_inspect',
@@ -86,6 +89,7 @@ const EXPECTED_TOOLS = [
   'afterglow_recalibrate',
   'afterglow_resume',
   'afterglow_sign',
+  'afterglow_version',
 ];
 
 try {
@@ -215,6 +219,115 @@ try {
     throw new Error('resume: expected 활성화 in reply');
   }
 
+  // version tool — should at least be able to list (snapshots auto-created by edit/sign earlier).
+  const versionList = assertOk(
+    'version-list',
+    await callTool('afterglow_version', { action: 'list', slug: 'jiyoon' }),
+  );
+  if (!/versions|버전/.test(versionList.content[0].text)) {
+    throw new Error('version list: missing header');
+  }
+
+  // access tool — set default deny + add allow rule + check
+  assertOk(
+    'access-set-default',
+    await callTool('afterglow_access', {
+      action: 'set-default',
+      slug: 'jiyoon',
+      defaultPolicy: 'deny',
+    }),
+  );
+  assertOk(
+    'access-allow',
+    await callTool('afterglow_access', {
+      action: 'allow',
+      slug: 'jiyoon',
+      rule: 'user:smoke',
+    }),
+  );
+  const accessAllow = assertOk(
+    'access-check-allow',
+    await callTool('afterglow_access', {
+      action: 'check',
+      slug: 'jiyoon',
+      caller: 'user:smoke',
+    }),
+  );
+  if (!/✓ allow/.test(accessAllow.content[0].text)) {
+    throw new Error('access check: user:smoke should be allowed');
+  }
+  const accessDeny = assertOk(
+    'access-check-deny',
+    await callTool('afterglow_access', {
+      action: 'check',
+      slug: 'jiyoon',
+      caller: 'user:other',
+    }),
+  );
+  if (!/✗ deny/.test(accessDeny.content[0].text)) {
+    throw new Error('access check: user:other should be denied under defaultPolicy=deny');
+  }
+  // Restore default to allow so subsequent calls don't break
+  assertOk(
+    'access-set-default-back',
+    await callTool('afterglow_access', {
+      action: 'set-default',
+      slug: 'jiyoon',
+      defaultPolicy: 'allow',
+    }),
+  );
+
+  // correct tool — feedback + list
+  assertOk(
+    'correct-feedback',
+    await callTool('afterglow_correct', {
+      action: 'feedback',
+      slug: 'jiyoon',
+      recordId: 'rec-smoke',
+      feedback: 'smoke test feedback',
+    }),
+  );
+  const correctList = assertOk(
+    'correct-list',
+    await callTool('afterglow_correct', { action: 'list', slug: 'jiyoon' }),
+  );
+  if (!/rec-smoke/.test(correctList.content[0].text)) {
+    throw new Error('correct list: missing recently appended record');
+  }
+
+  // handoff tool — start + status + abort (a full lifecycle is covered by unit tests)
+  // Use a fresh draft agent so we don't disturb jiyoon's state.
+  assertOk(
+    'handoff-create-draft',
+    await callTool('afterglow_create', {
+      slug: 'handofftest',
+      name: 'Handoff Test',
+      role: 'tester',
+    }),
+  );
+  const handoffStart = assertOk(
+    'handoff-start',
+    await callTool('afterglow_handoff', {
+      action: 'start',
+      slug: 'handofftest',
+      limit: 3,
+    }),
+  );
+  if (!/handoff 세션 시작/.test(handoffStart.content[0].text)) {
+    throw new Error('handoff start: expected 세션 시작');
+  }
+  const handoffStatus = assertOk(
+    'handoff-status',
+    await callTool('afterglow_handoff', { action: 'status', slug: 'handofftest' }),
+  );
+  if (!/pending 3/.test(handoffStatus.content[0].text)) {
+    throw new Error('handoff status: expected 3 pending');
+  }
+  assertOk(
+    'handoff-abort',
+    await callTool('afterglow_handoff', { action: 'abort', slug: 'handofftest' }),
+  );
+
   // council_summary on the latest transcript
   const summary = assertOk(
     'council_summary',
@@ -243,6 +356,10 @@ try {
   console.log(`  recalibrate output : ${recal.content[0].text.split('\n')[0]}`);
   console.log(`  council summary    : ${summaryJson.participants.length} participants, consensus=${summaryJson.consensusReached}`);
   console.log(`  archive round-trip : archive → list → restore → resume  OK`);
+  console.log(`  handoff lifecycle  : start (3 q) → status → abort  OK`);
+  console.log(`  access policy      : default deny + user:smoke allow + check OK`);
+  console.log(`  correct feedback   : feedback recorded + list shows entry`);
+  console.log(`  version list       : ${(versionList.content[0].text.match(/v\d+/g) ?? []).length} snapshot(s) tracked`);
 } catch (err) {
   console.error('smoke: FAIL');
   console.error(err instanceof Error ? err.stack : String(err));

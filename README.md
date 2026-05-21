@@ -79,7 +79,7 @@ claude /afterglow ask jiyoon "온보딩 step 3 이탈, 어떻게 줄였어요?"
       </td>
       <td>
         <a href="https://www.npmjs.com/package/@daeseoksong/afterglow-mcp"><code>@daeseoksong/afterglow-mcp</code></a> npm 패키지.<br>
-        Claude Code에 등록하면 <code>init · create · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive</code> 14 개 슬래시 명령이 동작.
+        Claude Code에 등록하면 <code>init · create · handoff · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · correct · archive · version · access</code> 18 개 슬래시 명령이 동작.
       </td>
     </tr>
     <tr>
@@ -113,6 +113,8 @@ claude /afterglow ask jiyoon "..."
 
 자세한 내용은 [`server/README.md`](./server/README.md) 참고.
 
+> **참고 — `/afterglow X --flag` 표기에 대해.** Afterglow 는 MCP 서버이며, 도구는 실제로 `afterglow_handoff({slug:"jiyoon", action:"start", limit:12})` 같은 JSON 호출입니다. Claude Code 가 `/afterglow handoff jiyoon --action start --limit 12` 자연어 입력을 적절한 JSON 으로 자동 변환합니다 — 셸 플래그 파서가 따로 도는 게 아니에요. 본 README 의 모든 `claude /afterglow …` 예시는 Claude 가 해석할 자연어 표기로 이해하시면 됩니다.
+
 ## 📐 인터랙티브 제안서 (프론트)
 
 전체 시스템을 어떻게 쓰는지 한 번에 둘러보는 18 개의 CLI 화면 모킹:
@@ -143,6 +145,44 @@ npm run dev      # → http://localhost:5173
 - 에이전트 chip (`T.Agent`) 클릭 → 상세 보기로 이동
 - 톱바 ←/→ 버튼, 푸터 prev/next 점프 카드
 
+## 🙋 본인 인계 모드 — 온보딩 흐름
+
+퇴사 1–2주 전, 본인이 자기 에이전트와 1:1 검수 세션을 엽니다 (`/afterglow handoff`).
+
+```bash
+# 1. 세션 시작 — 샘플 질문 N개 자동 생성 (또는 동료가 적어둔 questions.txt 로드)
+claude /afterglow handoff jiyoon --action start --limit 12
+
+# 2. 검수 — 각 질문에 keep / edit / decline
+#    edit 은 본인이 직접 답을 적어 덮어쓰기
+#    decline 은 "이 질문은 다른 에이전트에게 안내" (답하지 않기로)
+claude /afterglow handoff jiyoon --action review \
+  --reviews '[{"id":"q-…","action":"edit","userAnswer":"…"}, …]'
+
+# 3. 진행 확인 (언제든)
+claude /afterglow handoff jiyoon --action status
+
+# 4. 본인 서명 + active 전환
+claude /afterglow handoff jiyoon --action finalize --signer "이지윤"
+```
+
+- 본인이 작성한 edit / decline 답변은 `persona.bio` 의 `## handoff 답변` / `## 답하지 않기로 한 영역` 블록으로 흡수됨 (Claude 가 다음 ask 부터 이를 우선 인용)
+- 모든 단계가 `audit.log` + `history.log` 에 hash-chained 로 기록
+- 중간에 중단되면 같은 명령으로 재개. `--action abort` 로 폐기. `--sign-partial` 로 pending 남겨도 서명 강행
+
+이 흐름은 디자인의 핵심 가치 약속을 보장합니다:
+> *"본인이 동의하고 본인이 만든 디지털 자신"* — 자료에서 자동 추출된 페르소나가 본인 의도와 다를 수 있으니 검수 단계가 필수.
+
+### 본인 인계 vs HR 대리 인계
+
+| 경우 | 누가 서명하는가 | `--signer` 값 | 권장 흐름 |
+| --- | --- | --- | --- |
+| 본인이 퇴사 전 직접 검수 | 본인 | `"이지윤"` | `/afterglow handoff … --action finalize` |
+| 본인 부재(이미 퇴사·연락 불가) | HR / 매니저 대리 | `"HR · 김OO (대리, 본인 부재)"` | 같은 명령. signer 문자열에 **대리** 표시 필수 |
+| 동의 자체가 없음 | (서명 금지) | — | 도구 사용 불가 — `paused` 상태로만 보관 |
+
+`afterglow_sign` / `handoff finalize` 는 `signer` 값을 **그대로 신뢰**해서 `consent.md` 와 `audit.log` 에 기록할 뿐, 본인 인증(SSO·MFA)을 수행하지 않습니다. **PoC 단계 가정**입니다: 운영 환경에 올릴 땐 SSO 토큰 / 사내 ID 검증 / HR 결재 시스템과 묶어 사용하세요.
+
 ## 🧭 핵심 컨셉
 
 - **🪶 학습이 아니라 페르소나 + RAG.** Claude의 컨텍스트에 톤과 자료를 함께 주입 — fine-tune 없이 Claude Code 와 100% 호환.
@@ -171,6 +211,8 @@ sequenceDiagram
 ```
 
 **`afterglow_ask` 는 LLM 을 호출하지 않습니다.** 페르소나 system-prompt + RAG 결과를 구조화된 텍스트로 묶어 반환하면, Claude Code 가 자기 컨텍스트로 직접 답변을 생성합니다. → 추가 모델 / GPU / 임베딩 API 0원.
+
+> **PoC 한계 — RAG 인덱스 범위.** 현재 RAG는 `knowledge/` 안의 텍스트 형태(`.md` · `.txt` · `.csv` · `.jsonl`) 만 인덱싱합니다. **PDF 는 자동 파싱하지 않습니다.** PDF/PPT 자료는 외부 추출 후 `.md` / `.txt` 로 변환해 넣어주세요. (`pdftotext file.pdf -` 등). 자료 크기는 항목별 약 4MB 이하를 권장.
 
 ## 🛠 기술 스택
 
@@ -211,8 +253,8 @@ Afterglow/
 │  │  ├─ persona.ts        ← zod schema + 시스템 프롬프트 렌더링
 │  │  ├─ rag.ts            ← TF-IDF chunk retrieval (drop-in 교체 지점)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
-│  │  └─ tools/            ← 14 도구: init · create · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive
-│  └─ test/                ← vitest 74 + stdio 핸드셰이크 (14 도구)
+│  │  └─ tools/            ← 18 도구: init · create · handoff · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · correct · archive · version · access
+│  └─ test/                ← vitest 135 + stdio 핸드셰이크 (18 도구)
 │
 └─ docs/
    └─ design-source/       ← claude.ai/design 핸드오프 원본 (JSX) — 참조용
@@ -236,6 +278,10 @@ Afterglow/
    ├─ mcp-allowlist.yml      ← (예약) 에이전트별 MCP 권한
    ├─ consent.md             ← 서명 → status draft → active 전환
    ├─ history.log
+   ├─ access.json            ← 호출 권한 정책 (afterglow_access)
+   ├─ handoff.json           ← 본인 인계 세션 (afterglow_handoff)
+   ├─ corrections.log        ← 사용자 보정 누적 (afterglow_correct)
+   ├─ .versions/             ← persona 스냅샷 (afterglow_version)
    ├─ knowledge/             ← 원본 자료 (PDF · MD · TXT · CSV · JSONL)
    └─ embeddings/            ← RAG 인덱스 (PoC: TF-IDF, 추후 dense vector)
 ```
@@ -256,17 +302,34 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 74 vitest tests
-npm run test:stdio   # 실제 MCP stdio 핸드셰이크 (14 도구 전체)
+npm test             # 135 vitest tests
+npm run test:stdio   # 실제 MCP stdio 핸드셰이크 (18 도구 전체)
 npm run test:all     # 전체 (unit → build → stdio)
 ```
+
+## ⚠ Known PoC limits
+
+Afterglow v0.1.3 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋은 한계:
+
+| 영역 | 현재 동작 | 운영 시 보완 |
+| --- | --- | --- |
+| **본인 인증** | `signer` 값 그대로 기록 (SSO/MFA 없음) | HR 결재 시스템 / SSO 토큰과 묶어 사용 |
+| **RAG 인덱싱** | `.md`/`.txt`/`.csv`/`.jsonl` 만 — PDF/PPT 미지원 | 외부 추출 후 `.md` 로 변환 |
+| **`audit.log` 스케일** | 매 verify 마다 전체 read + 해시 재계산 | 수만 줄 누적 시 분할 / 체크포인트 필요 |
+| **`.versions/` 보존** | 모든 edit/sign/handoff/rollback 이 영구 스냅샷 | 정기적 수동 정리 (`rm` + `tags.json` 동기화) |
+| **`afterglow_correct` 권한** | `access.json` 은 `ask` 에만 적용 — correct 는 무차별 호출 | 운영 시 wrapper 로 per-tool ACL 추가 |
+| **GDPR 삭제** | `archive` 는 `archive/<slug>/` 로 이동만 — 실제 삭제 아님 | 만료 후 수동 `rm -rf` + registry 정리 |
+| **다중 프로세스** | in-process lock 만 — 단일 stdio 서버 가정 | 분산 운영 시 외부 mutex (Redis/DB) 필요 |
+| **사이드 로그 무결성** | `audit.log` 만 해시 체인 — `history.log` / `consent.md` 등은 평문 | 운영 시 sibling 파일도 audit meta 에 해시 |
+
+이 모두는 PoC 의 의도된 trade-off 이며, 진짜 운영하려면 별도 환경에서 보완해야 합니다.
 
 ## 🗺 Roadmap
 
 ### 현재 (v0.1.3)
 - [x] 18 화면 인터랙티브 제안서 (Vite + React 19 + TS)
 - [x] Cmd+K 팔레트 + 키보드 단축키 + 화면 간 클릭 네비
-- [x] **MCP 서버 14 도구**: `init` · `create` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `archive`
+- [x] **MCP 서버 18 도구**: `init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access`
 - [x] persona zod schema + 시스템 프롬프트 자동 렌더링
 - [x] **TF-IDF RAG** (외부 의존성 0 · 키워드 매칭 대비 정확도 ↑)
 - [x] **SHA-256 hash-chained 감사 로그** + 무결성 검증
@@ -274,7 +337,7 @@ npm run test:all     # 전체 (unit → build → stdio)
 - [x] **신뢰도 자동 보정** (전역 + **expertise-aware by-topic** 진단)
 - [x] **`afterglow_archive`** — 에이전트 보관 / 복원 (archive/<slug>/ 별도 폴더, restore는 paused 상태로)
 - [x] **Council moderator** — 강화된 합의 감지 규칙 + `afterglow_council_summary` 자동 요약 도구
-- [x] vitest 74개 + stdio 핸드셰이크 (14 도구 전체 검증)
+- [x] vitest 135개 + stdio 핸드셰이크 (18 도구 전체 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 
 ### 다음

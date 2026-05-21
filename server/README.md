@@ -23,7 +23,7 @@
 <p>
   <a href="#-한-줄-설치"><b>한 줄 설치</b></a> ·
   <a href="#-동작-원리">동작 원리</a> ·
-  <a href="#-도구-14개">도구 14개</a> ·
+  <a href="#-도구-18개">도구 18개</a> ·
   <a href="#-폴더-구조">폴더 구조</a> ·
   <a href="#-development">개발</a> ·
   <a href="https://github.com/DaeSeokSong/Afterglow">GitHub →</a>
@@ -63,6 +63,8 @@ claude /afterglow list
 claude /afterglow ask jiyoon "온보딩 step 3 이탈, 어떻게 줄였어요?"
 ```
 
+> **참고 — `/afterglow X --flag` 표기에 대해.** Afterglow 는 MCP 서버이며, 도구는 실제로 `afterglow_handoff({slug: "jiyoon", action: "start", limit: 12})` 같은 JSON 호출입니다. Claude Code 가 `/afterglow handoff jiyoon --action start --limit 12` 같은 자연어 입력을 적절한 JSON 으로 자동 변환합니다 — 셸 플래그 파서가 따로 도는 게 아니에요. 본 README 의 모든 `claude /afterglow …` 예시는 Claude 가 해석할 자연어 표기로 이해하세요.
+
 ## 🪶 왜 만들었나
 
 | 기존 방식 | Afterglow |
@@ -94,7 +96,7 @@ sequenceDiagram
 
 **핵심**: `afterglow_ask`는 LLM을 호출하지 않습니다. 페르소나와 검색 결과를 구조화된 텍스트로 묶어 반환하고, Claude Code 가 자기 컨텍스트로 직접 답변을 생성합니다. → 추가 모델 / GPU / 임베딩 API 0원.
 
-## 🛠 도구 14개
+## 🛠 도구 18개
 
 <table>
   <thead>
@@ -118,13 +120,34 @@ sequenceDiagram
     <tr>
       <td><code>afterglow_sign</code></td>
       <td><code>/afterglow sign &lt;slug&gt; --signer "…"</code></td>
-      <td><code>consent.md</code>에 서명 블록 추가 + status <b>draft → active</b> 전환. 미서명 에이전트는 <code>ask</code> / <code>council</code> 거부.</td>
+      <td><code>consent.md</code>에 서명 블록 추가 + status <b>draft → active</b> 전환. 미서명 에이전트는 <code>ask</code> / <code>council</code> 거부.
+        <br><sub>⚠ <code>signer</code> 값은 그대로 기록만 됩니다 — 본인 인증(SSO·MFA) 없음. HR 대리 서명 시 <code>"HR · 김OO (대리, 본인 부재)"</code> 처럼 <b>대리</b>를 명시하세요. PoC 가정.</sub></td>
     </tr>
     <tr>
       <td><code>afterglow_resume</code></td>
       <td><code>/afterglow resume &lt;slug&gt;</code></td>
       <td>paused / draft / learning 상태의 에이전트를 다시 active 로. <code>archive → restore</code> 직후, 또는 본인이 자리를 비웠다 돌아왔는데 기존 서명이 유효한 경우 사용. archived 는 거부 — 먼저 <code>--action restore</code> 필요.
         <br><sub>⚠ <code>resume</code> 은 consent gate 를 <b>우회</b>합니다 (consent.md 가 유효한지 사용자 판단). 새 서명이 필요한 케이스에는 <code>sign</code> 을 쓰세요.</sub></td>
+    </tr>
+    <tr>
+      <td><code>afterglow_handoff</code></td>
+      <td><code>/afterglow handoff &lt;slug&gt; --action start|review|status|finalize|abort</code></td>
+      <td><b>본인 인계 모드 (self-review onboarding).</b> 퇴사자 본인이 자기 에이전트의 샘플 질문 N 개를 직접 검수. 각 질문에 <code>keep</code> / <code>edit</code> / <code>decline</code> 셋 중 하나. 동료가 미리 적어둔 <code>questions.txt</code> 도 받음 (에이전트 폴더 또는 CWD 안 — 절대경로 임의 파일 차단). 본인 서명으로 active 전환되고, <code>edit</code> 한 답변은 <code>persona.bio</code> 의 <code>## handoff 답변</code> 블록으로, <code>decline</code> 한 질문은 <code>## 답하지 않기로 한 영역</code> 블록으로 흡수돼서 다음 ask 부터 우선 인용됩니다.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_correct</code></td>
+      <td><code>/afterglow correct &lt;slug&gt; --action feedback|edit-answer|save-rule|list</code></td>
+      <td>ask 결과에 자연어 피드백 (<code>feedback</code> "이 부분만 다시 써줘"), 답변 라인 직접 편집 (<code>edit-answer</code>), 반복 패턴을 규칙으로 저장 (<code>save-rule</code>). <code>corrections.log</code> + <code>history.log</code> + <code>audit</code> 모두 누적.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_version</code></td>
+      <td><code>/afterglow version &lt;slug&gt; --action list|diff|rollback|tag|snapshot</code></td>
+      <td>persona 버전 히스토리. <code>edit</code> / <code>sign</code> / <code>recalibrate apply</code> / <code>handoff finalize</code> 시 자동 스냅샷. <code>diff</code> 두 버전 비교, <code>rollback</code> 복원 (안전 스냅샷 자동), <code>tag</code> 로 stable · handoff-signed 같은 라벨, <code>snapshot</code> 수동 백업. <code>agents/&lt;slug&gt;/.versions/</code> 에 보관.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_access</code></td>
+      <td><code>/afterglow access &lt;slug&gt; --action list|allow|deny|remove|set-default|check</code></td>
+      <td><code>user:</code> / <code>role:</code> / <code>team:</code> 단위 allow/deny 리스트 + default 정책. <code>ask</code> 호출 시 <code>caller</code> 인자 주면 자동 체크 (없으면 anonymous). <code>check</code> 액션으로 안전하게 시뮬레이션.</td>
     </tr>
     <tr>
       <td><code>afterglow_list</code></td>
@@ -221,7 +244,11 @@ sequenceDiagram
    ├─ mcp-allowlist.yml      ← (예약) 에이전트별 MCP 권한
    ├─ consent.md             ← 서명 → status draft → active
    ├─ history.log            ← 호출 / 피드백 / 수정 누적
-   ├─ knowledge/             ← 원본 자료 (PDF · MD · TXT · CSV · JSONL)
+   ├─ access.json            ← 호출 권한 정책 (afterglow_access)
+   ├─ handoff.json           ← 본인 인계 세션 (afterglow_handoff)
+   ├─ corrections.log        ← 사용자 보정 누적 (afterglow_correct)
+   ├─ .versions/             ← persona 스냅샷 (afterglow_version)
+   ├─ knowledge/             ← 원본 자료 (.md · .txt · .csv · .jsonl 만 인덱싱. PDF는 별도 변환 필요)
    └─ embeddings/            ← RAG 인덱스 (PoC: TF-IDF, 추후 dense vector)
 ```
 
@@ -241,8 +268,8 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (74 tests — storage 12 + tools 29 + phase4 33)
-npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (14 도구 모두 happy-path + 체인 검증)
+npm test                   # vitest (135 tests — storage 12 + tools 29 + phase4 33 + phase6 61)
+npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (18 도구 모두 happy-path + 체인 검증)
 npm run test:all           # 전체 (unit → build → stdio)
 ```
 
@@ -261,22 +288,27 @@ server/
 │     ├─ create.ts
 │     ├─ sign.ts
 │     ├─ resume.ts          ← consent gate 우회 1-step 재활성화
+│     ├─ handoff.ts         ← 본인 인계 모드 (start/review/status/finalize/abort)
 │     ├─ list.ts
 │     ├─ inspect.ts
-│     ├─ ask.ts
-│     ├─ edit.ts
+│     ├─ ask.ts             ← caller 인자 시 access 정책 체크
+│     ├─ edit.ts            ← 변경 전 자동 스냅샷
 │     ├─ council.ts
 │     ├─ council_summary.ts
 │     ├─ history.ts
 │     ├─ audit.ts
-│     ├─ recalibrate.ts   ← global + by-topic (expertise-aware)
-│     ├─ archive.ts       ← archive / restore / list
-│     └─ types.ts       ← ToolReply + safe() 래퍼
+│     ├─ recalibrate.ts     ← global + by-topic (expertise-aware) + 자동 스냅샷
+│     ├─ correct.ts         ← feedback / edit-answer / save-rule
+│     ├─ archive.ts         ← archive / restore / list
+│     ├─ version.ts         ← list / diff / rollback / tag / snapshot
+│     ├─ access.ts          ← user:/role:/team: allow/deny + check
+│     └─ types.ts           ← ToolReply + safe() 래퍼
 ├─ test/
 │  ├─ storage.test.ts   ← vitest (12 tests)
 │  ├─ tools.test.ts     ← vitest (29 tests — v0.1.1 도구 + RAG + 엣지케이스)
 │  ├─ phase4.test.ts    ← vitest (33 tests — archive / council_summary / by-topic / resume + 회귀)
-│  └─ stdio.smoke.mjs   ← 실제 MCP stdio 핸드셰이크 (14 도구 + archive 라운드트립)
+│  ├─ phase6.test.ts    ← vitest (61 tests — handoff / version / access / correct + P0 보안 회귀)
+│  └─ stdio.smoke.mjs   ← 실제 MCP stdio 핸드셰이크 (18 도구 + archive 라운드트립)
 ├─ tsconfig.json
 ├─ vitest.config.ts
 └─ package.json
@@ -296,9 +328,22 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 
 `embeddings/` 폴더는 PoC에서도 이미 생성됩니다 — 백엔드만 갈아끼우면 됩니다.
 
+## ⚠ Known PoC limits
+
+| 영역 | 현재 동작 | 운영 시 보완 |
+| --- | --- | --- |
+| **본인 인증** | `signer` 값 그대로 기록 (SSO/MFA 없음) | HR 결재 시스템 / SSO 토큰과 묶어 사용 |
+| **RAG 인덱싱** | `.md`/`.txt`/`.csv`/`.jsonl` 만 — PDF/PPT 미지원 | 외부 추출 후 `.md` 로 변환 |
+| **`audit.log` 스케일** | 매 verify 마다 전체 read + 해시 재계산 | 수만 줄 누적 시 분할 / 체크포인트 필요 |
+| **`.versions/` 보존** | 모든 edit/sign/handoff/rollback 이 영구 스냅샷 | 정기적 수동 정리 (`rm` + `tags.json` 동기화) |
+| **`afterglow_correct` 권한** | `access.json` 은 `ask` 에만 적용 | 운영 시 wrapper 로 per-tool ACL 추가 |
+| **GDPR 삭제** | `archive` 는 `archive/<slug>/` 로 이동만 | 만료 후 수동 `rm -rf` + registry 정리 |
+| **다중 프로세스** | in-process lock 만 — 단일 stdio 서버 가정 | 분산 운영 시 외부 mutex (Redis/DB) |
+| **사이드 로그 무결성** | `audit.log` 만 해시 체인 | `history.log` / `consent.md` 등도 hash → audit meta |
+
 ## 🗺 Roadmap
 
-- [x] 14 도구 전부 출시: init · create · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive
+- [x] 18 도구 전부 출시: init · create · handoff · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · correct · archive · version · access
 - [x] zod 스키마 + 시스템 프롬프트 자동 렌더링
 - [x] TF-IDF RAG (오프라인 · 외부 의존성 0)
 - [x] SHA-256 hash-chained 감사 로그 + 무결성 검증
@@ -306,7 +351,7 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 - [x] 신뢰도 보정: 전역 + **expertise-aware by-topic** 진단
 - [x] **`afterglow_archive`** — 에이전트 보관 / 복원
 - [x] **Council moderator** — 강화된 합의 감지 + `afterglow_council_summary` 자동 요약
-- [x] vitest 74개 + 전 도구 stdio 핸드셰이크
+- [x] vitest 135개 + 전 도구 stdio 핸드셰이크
 - [ ] Web companion: 공유 가능한 read-only "afterglow 페이지"
 - [ ] Slack 연동
 

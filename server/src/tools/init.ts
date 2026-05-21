@@ -6,6 +6,7 @@ import { safe, type ToolReply } from './types.js';
 export const initShape = {
   embeddingModel: z
     .string()
+    .max(200)
     .optional()
     .describe('RAG 검색용 임베딩 모델 이름. 기본값은 text-embedding-3-small.'),
 } as const;

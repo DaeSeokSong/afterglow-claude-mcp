@@ -79,7 +79,7 @@ claude /afterglow ask jiyoon "Onboarding step-3 drop-off — how did you cut it?
       </td>
       <td>
         <a href="https://www.npmjs.com/package/@daeseoksong/afterglow-mcp"><code>@daeseoksong/afterglow-mcp</code></a> on npm.<br>
-        Register it and Claude Code gets 14 slash commands (<code>init · create · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive</code>).
+        Register it and Claude Code gets 18 slash commands (<code>init · create · handoff · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · correct · archive · version · access</code>).
       </td>
     </tr>
     <tr>
@@ -113,6 +113,8 @@ claude /afterglow ask jiyoon "..."
 
 See [`server/README.md`](./server/README.md) for the full tool reference.
 
+> **A note on `/afterglow X --flag` syntax.** Afterglow is an MCP server — the actual tool calls are JSON like `afterglow_handoff({slug: "jiyoon", action: "start", limit: 12})`. Claude Code translates a natural-language line such as `/afterglow handoff jiyoon --action start --limit 12` into the right JSON; there is no shell-flag parser. Every `claude /afterglow …` example below is shorthand for what you'd say to Claude, not a literal CLI invocation.
+
 ## 📐 Interactive proposal (frontend)
 
 18 CLI screen mock-ups that walk you through every command and edge case:
@@ -143,6 +145,44 @@ npm run dev      # → http://localhost:5173
 - Agent chips (`T.Agent`) jump to the inspect screen.
 - Topbar ←/→ buttons, footer prev/next jump cards.
 
+## 🙋 Self-review onboarding (`afterglow_handoff`)
+
+A week or two before leaving, the person sits down for a 1-on-1 review session with their own agent:
+
+```bash
+# 1. Start — auto-generate N sample questions (or load coworker-written questions.txt)
+claude /afterglow handoff jiyoon --action start --limit 12
+
+# 2. Review — keep / edit / decline each question
+#    edit: write your own answer to override the agent's draft
+#    decline: "I won't answer that — please ask someone else"
+claude /afterglow handoff jiyoon --action review \
+  --reviews '[{"id":"q-…","action":"edit","userAnswer":"…"}, …]'
+
+# 3. Status (any time)
+claude /afterglow handoff jiyoon --action status
+
+# 4. Self-sign + flip to active
+claude /afterglow handoff jiyoon --action finalize --signer "Jiyoon Lee"
+```
+
+- Edited / declined answers are absorbed into `persona.bio` as `## handoff 답변` / `## 답하지 않기로 한 영역` blocks so future `ask` calls cite them first.
+- Every step lands in `audit.log` + `history.log` with the hash-chained trail.
+- Resume by re-running the same command. `--action abort` discards. `--sign-partial` finalises even with pending items.
+
+This delivers on the core promise:
+> *"A digital self the person actually consented to."* Persona extracted from raw materials may diverge from the person's intent, so the review pass is mandatory.
+
+### Self-handoff vs HR-delegated handoff
+
+| Case | Who signs | `--signer` value | Recommended flow |
+| --- | --- | --- | --- |
+| Person reviews before leaving | Themselves | `"Jiyoon Lee"` | `/afterglow handoff … --action finalize` |
+| Person already gone / unreachable | HR or manager on their behalf | `"HR · J. Kim (delegated, person unavailable)"` | Same command. The signer string **must** flag the delegation explicitly |
+| No consent at all | (Do not sign) | — | Keep the agent at `paused`; never finalize |
+
+`afterglow_sign` / `handoff finalize` **trust the `signer` string verbatim** — they record it in `consent.md` and `audit.log` but do **not** perform identity verification (SSO / MFA). This is a deliberate PoC choice: in production, wrap the tool with SSO tokens, corporate ID checks, or an HR approval system.
+
 ## 🧭 Core ideas
 
 - **🪶 Persona + RAG, not fine-tuning.** Inject the person's tone and sources into Claude's context — fully compatible with Claude Code.
@@ -171,6 +211,8 @@ sequenceDiagram
 ```
 
 **`afterglow_ask` never calls an LLM.** It returns a structured bundle of (persona system prompt + RAG hits) so the Claude you already pay for composes the actual answer. → No extra model, no GPU, no embedding API.
+
+> **PoC limit — RAG indexing scope.** Today the retriever only indexes text-shaped files inside `knowledge/` (`.md` · `.txt` · `.csv` · `.jsonl`). **PDFs are not parsed automatically.** Convert PDFs/decks to `.md` or `.txt` before dropping them in (`pdftotext file.pdf -`, etc.). Keep each item under ~4 MB.
 
 ## 🛠 Tech stack
 
@@ -212,10 +254,10 @@ Afterglow/
 │  │  ├─ persona.ts        ← zod schema + system-prompt rendering
 │  │  ├─ rag.ts            ← TF-IDF retrieval (drop-in swap point)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
-│  │  └─ tools/            ← 14 tools: init · create · sign · resume · list · inspect
-│  │                         ask · edit · council · council_summary · history
-│  │                         audit · recalibrate · archive
-│  └─ test/                ← 74 vitest + stdio handshake (covers all 14 tools)
+│  │  └─ tools/            ← 18 tools: init · create · handoff · sign · resume · list
+│  │                         inspect · ask · edit · council · council_summary · history
+│  │                         audit · recalibrate · correct · archive · version · access
+│  └─ test/                ← 135 vitest + stdio handshake (covers all 18 tools)
 │
 └─ docs/
    └─ design-source/       ← original claude.ai/design hand-off (JSX) — reference
@@ -239,6 +281,10 @@ Afterglow/
    ├─ mcp-allowlist.yml      ← (reserved) per-agent MCP allowlist
    ├─ consent.md             ← signature block flips status draft → active
    ├─ history.log
+   ├─ access.json            ← call permission policy (afterglow_access)
+   ├─ handoff.json           ← self-review session state (afterglow_handoff)
+   ├─ corrections.log        ← user-correction trail (afterglow_correct)
+   ├─ .versions/             ← persona snapshots (afterglow_version)
    ├─ knowledge/             ← raw sources (PDF · MD · TXT · CSV · JSONL)
    └─ embeddings/            ← RAG index (PoC: TF-IDF; later: dense vectors)
 ```
@@ -259,17 +305,34 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 74 vitest tests
-npm run test:stdio   # real MCP stdio handshake (all 14 tools)
+npm test             # 135 vitest tests
+npm run test:stdio   # real MCP stdio handshake (all 18 tools)
 npm run test:all     # unit → build → stdio
 ```
+
+## ⚠ Known PoC limits
+
+Afterglow v0.1.3 is a **proof of concept**. Things to know before pulling it into production:
+
+| Area | Current behaviour | What you'd add for production |
+| --- | --- | --- |
+| **Identity** | `signer` recorded verbatim — no SSO / MFA | Wrap with corporate SSO tokens or HR approval system |
+| **RAG indexing** | `.md` / `.txt` / `.csv` / `.jsonl` only — no PDF parsing | Convert PDFs to `.md` externally before dropping in |
+| **`audit.log` scale** | Every verify reads the whole file and re-hashes | At tens of thousands of rows, add chunked checkpoints |
+| **`.versions/` retention** | Every edit / sign / handoff / rollback is a permanent snapshot | Periodic manual pruning (`rm` + sync `tags.json`) |
+| **`afterglow_correct` ACL** | `access.json` gates `ask` only — correct accepts any caller | Add per-tool ACL wrapper for production |
+| **GDPR delete** | `archive` only moves to `archive/<slug>/` — not real deletion | After retention window, manual `rm -rf` + registry edit |
+| **Multi-process** | In-process locks only — assumes one stdio server | Externalise to Redis/DB mutex for distributed runs |
+| **Side-log integrity** | Only `audit.log` is hash-chained — `history.log` / `consent.md` etc are plain text | Hash sibling files into audit `meta` for full coverage |
+
+These are deliberate PoC trade-offs; closing them is a separate exercise for any operational deployment.
 
 ## 🗺 Roadmap
 
 ### Now (v0.1.3)
 - [x] 18-screen interactive proposal (Vite + React 19 + TS)
 - [x] Cmd+K palette + keyboard shortcuts + cross-screen click navigation
-- [x] All 14 MCP tools (`init` · `create` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `archive`)
+- [x] All 18 MCP tools (`init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access`)
 - [x] zod persona schema + auto-rendered system prompt
 - [x] TF-IDF RAG retrieval (no external deps)
 - [x] SHA-256 hash-chained audit log + verifier
@@ -277,7 +340,7 @@ npm run test:all     # unit → build → stdio
 - [x] Recalibrate: global + **expertise-aware by-topic** diagnostic
 - [x] **`afterglow_archive`** — archive / restore agents (archive/<slug>/ separate folder; restore lands in paused)
 - [x] **Council moderator** — stronger consensus rules + `afterglow_council_summary` auto-summarizer
-- [x] 74 vitest + extended stdio handshake (covers every tool)
+- [x] 135 vitest + extended stdio handshake (covers every tool)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 
 ### Next

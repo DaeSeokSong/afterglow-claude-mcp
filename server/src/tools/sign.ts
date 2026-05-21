@@ -5,6 +5,7 @@ import {
   appendHistory,
   assertInitialized,
   signConsent,
+  snapshotPersona,
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
@@ -14,8 +15,13 @@ export const signShape = {
   signer: z
     .string()
     .min(1)
-    .describe('서명자 표시명. 본인 인계 모드면 본인 이름, 위임 인계면 친권자 이름.'),
-  note: z.string().optional().describe('선택. 동의 범위·기한·특이사항 등의 짧은 메모.'),
+    .max(200)
+    .describe('서명자 표시명. 본인 인계 모드면 본인 이름, HR 대리 인계면 "HR · 김OO (대리, 본인 부재)" 같은 형식. CR/LF 자동 제거.'),
+  note: z
+    .string()
+    .max(1_000)
+    .optional()
+    .describe('선택. 동의 범위·기한·특이사항 등의 짧은 메모. 최대 1000자.'),
 } as const;
 
 interface SignArgs {
@@ -35,13 +41,27 @@ export async function runSign(args: SignArgs): Promise<ToolReply> {
     if (!(await agentExists(args.slug))) {
       return errorReply(new AgentNotFoundError(args.slug).message);
     }
+    const snap = await snapshotPersona(args.slug, `sign by ${args.signer}`);
     const r = await signConsent(args.slug, args.signer, args.note);
-    await appendHistory(args.slug, `signed by ${args.signer} (${r.previousStatus} → active)`);
+    await appendHistory(
+      args.slug,
+      `signed by ${args.signer} (${r.previousStatus} → active, snapshot ${snap.id})`,
+    );
+    // Put the sanitized signer into meta (not just summary) so the audit
+    // tool's structured filters can find "all HR-delegated signs", "all
+    // signs by user X", etc. The summary is for human eyeballs; meta is
+    // for the queryable record.
     await auditAppend({
       tool: 'afterglow_sign',
       slug: args.slug,
-      summary: `signed by ${args.signer}`,
-      meta: { previousStatus: r.previousStatus, signedAt: r.signedAt },
+      summary: `signed by ${r.signer}`,
+      meta: {
+        signer: r.signer,
+        signerHint: /대리|delegated|HR\s*·/i.test(r.signer) ? 'delegated' : 'self',
+        previousStatus: r.previousStatus,
+        signedAt: r.signedAt,
+        noteLength: args.note ? args.note.length : 0,
+      },
     });
 
     const lines = [

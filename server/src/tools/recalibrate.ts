@@ -6,6 +6,7 @@ import {
   assertInitialized,
   readHistory,
   readPersona,
+  snapshotPersona,
   writePersona,
   writeSystemPrompt,
 } from '../storage.js';
@@ -475,11 +476,12 @@ export async function runRecalibrate(args: RecalibrateArgs): Promise<ToolReply> 
         `recalibrate 후 persona 검증 실패: ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
       );
     }
+    const snap = await snapshotPersona(args.slug, `recalibrate apply · ${adjustments.length} fields`);
     await writePersona(args.slug, parsed.data);
     await writeSystemPrompt(args.slug, renderSystemPrompt(parsed.data));
     await appendHistory(
       args.slug,
-      `recalibrate applied (${adjustments.map((a) => a.field).join(', ')})`,
+      `recalibrate applied (${adjustments.map((a) => a.field).join(', ')}, snapshot ${snap.id})`,
     );
     await auditAppend({
       tool: 'afterglow_recalibrate',
@@ -488,6 +490,7 @@ export async function runRecalibrate(args: RecalibrateArgs): Promise<ToolReply> 
       meta: {
         adjustments: adjustments.map((a) => ({ field: a.field, before: a.before, after: a.after })),
         stats,
+        snapshot: snap.id,
       },
     });
 

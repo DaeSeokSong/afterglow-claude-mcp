@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import {
-  agentExists,
-  AgentNotFoundError,
   appendHistory,
   assertInitialized,
+  assertWritable,
+  getStatus,
   readPersona,
+  snapshotPersona,
   writePersona,
   writeSystemPrompt,
 } from '../storage.js';
@@ -42,10 +43,10 @@ export const editShape = {
   slug: z.string().min(1).describe('수정할 에이전트 slug.'),
 
   /* 기본 정보 */
-  name: z.string().min(1).optional().describe('이름 변경.'),
-  role: z.string().min(1).optional().describe('직무 / 부서 변경.'),
-  tenure: z.string().optional().describe('재직 기간 변경. 빈 문자열 → 제거.'),
-  bio: z.string().optional().describe('한 줄 소개 변경. 빈 문자열 → 제거.'),
+  name: z.string().min(1).max(200).optional().describe('이름 변경.'),
+  role: z.string().min(1).max(200).optional().describe('직무 / 부서 변경.'),
+  tenure: z.string().max(200).optional().describe('재직 기간 변경. 빈 문자열 → 제거.'),
+  bio: z.string().max(20_000).optional().describe('한 줄 소개 변경. 빈 문자열 → 제거. 최대 20000자.'),
 
   /* 영역 */
   addExpertise: z.array(ExpertiseSchema).optional().describe('자신있는 영역 추가.'),
@@ -126,8 +127,16 @@ interface Change {
 export async function runEdit(args: EditArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
-    if (!(await agentExists(args.slug))) {
-      return errorReply(new AgentNotFoundError(args.slug).message);
+    try {
+      await getStatus(args.slug); // registry-aware existence
+    } catch (e) {
+      return errorReply((e as Error).message);
+    }
+    // edit always mutates persona — refuse on archived agents.
+    try {
+      await assertWritable(args.slug);
+    } catch (e) {
+      return errorReply((e as Error).message);
     }
 
     const current = await readPersona(args.slug);
@@ -286,14 +295,16 @@ export async function runEdit(args: EditArgs): Promise<ToolReply> {
     }
 
     if (!args.dryRun) {
+      // Snapshot before mutating — rollback is `/afterglow version rollback <id>`.
+      const snap = await snapshotPersona(args.slug, `edit · ${changes.length} field(s)`);
       await writePersona(args.slug, parsed.data);
       await writeSystemPrompt(args.slug, renderSystemPrompt(parsed.data));
-      await appendHistory(args.slug, `edit (${changes.length} field${changes.length > 1 ? 's' : ''})`);
+      await appendHistory(args.slug, `edit (${changes.length} field${changes.length > 1 ? 's' : ''}, snapshot ${snap.id})`);
       await auditAppend({
         tool: 'afterglow_edit',
         slug: args.slug,
         summary: `${changes.length} fields changed`,
-        meta: { fields: changes.map((c) => c.field) },
+        meta: { fields: changes.map((c) => c.field), snapshot: snap.id },
       });
       lines.push('');
       lines.push('✓ persona.json 저장 + system-prompt.md 재생성 + history.log 기록');

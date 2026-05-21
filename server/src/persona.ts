@@ -55,11 +55,14 @@ export type Source = z.infer<typeof SourceSchema>;
 
 export const PersonaSchema = z
   .object({
-    slug: z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/i),
-    name: z.string().min(1),
-    role: z.string().min(1),
-    tenure: z.string().min(1).optional(),
-    bio: z.string().optional(),
+    // Strict lowercase to match storage.ts SLUG_RE — preventing case-collision
+    // smuggling on case-insensitive filesystems (Windows / macOS default APFS).
+    // A snapshot or hand-edited persona with slug="Alice" must NOT load.
+    slug: z.string().regex(/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/),
+    name: z.string().min(1).max(200),
+    role: z.string().min(1).max(200),
+    tenure: z.string().min(1).max(200).optional(),
+    bio: z.string().max(20_000).optional(),
     expertise: z.array(ExpertiseSchema).default([]),
     tone: ToneSchema.default({
       honorific: 80,

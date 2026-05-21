@@ -196,7 +196,8 @@ export async function runCouncil(args: CouncilArgs): Promise<ToolReply> {
     }
 
     out.push('## 회의록');
-    out.push(`작성 후 ${path} 에 append 해 주세요. 사용자가 추후 \`/afterglow council summary ${file.replace('.md', '')}\` 로 합의/이견 자동 요약을 볼 수 있어요. 파일을 직접 열어보고 싶으면 그냥 \`cat ${path}\`.`);
+    out.push(`작성 후 ${path} 에 append 해 주세요. 사용자가 추후 \`/afterglow council summary ${file.replace('.md', '')}\` 로 합의/이견 자동 요약을 볼 수 있어요.`);
+    out.push(`(파일 직접 열기: macOS/Linux \`cat ${path}\` · Windows PowerShell \`Get-Content ${path}\`)`);
 
     return { content: [{ type: 'text', text: out.join('\n') }] };
   });

@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { rootDir } from './storage.js';
+import { rootDir, withLock } from './storage.js';
 
 export interface AuditRecord {
   seq: number;
@@ -94,24 +94,30 @@ export interface AppendInput {
 }
 
 export async function append(input: AppendInput): Promise<AuditRecord> {
-  const last = await lastRecord();
-  const seq = (last?.seq ?? 0) + 1;
-  const prev = last?.hash ?? GENESIS;
-  const ts = new Date().toISOString();
-  const body: Omit<AuditRecord, 'hash'> = {
-    seq,
-    ts,
-    prev,
-    tool: input.tool,
-    slug: input.slug,
-    summary: input.summary,
-    meta: input.meta,
-  };
-  const hash = sha256Hex(canonicalBody(body));
-  const record: AuditRecord = { ...body, hash };
-  await ensureDir(dirname(auditPath()));
-  await fs.appendFile(auditPath(), JSON.stringify(record) + '\n', 'utf8');
-  return record;
+  // Serialise every append against a single global lock. Two concurrent
+  // tool calls would otherwise see the same lastRecord() and emit
+  // conflicting (seq, prev) — silently breaking the tamper-evidence
+  // chain. The lock is held for the whole read-modify-write window.
+  return withLock('audit-append', async () => {
+    const last = await lastRecord();
+    const seq = (last?.seq ?? 0) + 1;
+    const prev = last?.hash ?? GENESIS;
+    const ts = new Date().toISOString();
+    const body: Omit<AuditRecord, 'hash'> = {
+      seq,
+      ts,
+      prev,
+      tool: input.tool,
+      slug: input.slug,
+      summary: input.summary,
+      meta: input.meta,
+    };
+    const hash = sha256Hex(canonicalBody(body));
+    const record: AuditRecord = { ...body, hash };
+    await ensureDir(dirname(auditPath()));
+    await fs.appendFile(auditPath(), JSON.stringify(record) + '\n', 'utf8');
+    return record;
+  });
 }
 
 export interface ChainVerification {

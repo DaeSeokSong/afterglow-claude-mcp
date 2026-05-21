@@ -23,7 +23,7 @@
 <p>
   <a href="#-one-line-install"><b>One-line install</b></a> ·
   <a href="#-how-it-works">How it works</a> ·
-  <a href="#-the-14-tools">14 tools</a> ·
+  <a href="#-the-18-tools">18 tools</a> ·
   <a href="#-folder-layout">Folder layout</a> ·
   <a href="#-development">Dev</a> ·
   <a href="https://github.com/DaeSeokSong/Afterglow">GitHub →</a>
@@ -63,6 +63,8 @@ claude /afterglow list
 claude /afterglow ask jiyoon "..."
 ```
 
+> **A note on `/afterglow X --flag` syntax.** Afterglow is an MCP server — the actual tool calls are JSON like `afterglow_handoff({slug: "jiyoon", action: "start", limit: 12})`. Claude Code translates a natural-language line such as `/afterglow handoff jiyoon --action start --limit 12` into the right JSON; there is no shell-flag parser. Every `claude /afterglow …` example below is shorthand for what you'd say to Claude, not a literal CLI invocation.
+
 ## 🪶 Why this exists
 
 | Old way | Afterglow |
@@ -94,7 +96,7 @@ sequenceDiagram
 
 **`afterglow_ask` never calls an LLM.** It returns a bundle of (persona system prompt + RAG hits) so the Claude you already pay for writes the actual answer. → No extra model, GPU, or embedding API.
 
-## 🛠 The 14 tools
+## 🛠 The 18 tools
 
 <table>
   <thead>
@@ -118,13 +120,34 @@ sequenceDiagram
     <tr>
       <td><code>afterglow_sign</code></td>
       <td><code>/afterglow sign &lt;slug&gt; --signer "…"</code></td>
-      <td>Append a signature block to <code>consent.md</code> and flip status <b>draft → active</b>. Unsigned agents are blocked from <code>ask</code> / <code>council</code>.</td>
+      <td>Append a signature block to <code>consent.md</code> and flip status <b>draft → active</b>. Unsigned agents are blocked from <code>ask</code> / <code>council</code>.
+        <br><sub>⚠ The <code>signer</code> string is recorded as-is — there is no identity verification (SSO/MFA). For HR-delegated signing, flag it explicitly: <code>"HR · J. Kim (delegated, person unavailable)"</code>. PoC scope.</sub></td>
     </tr>
     <tr>
       <td><code>afterglow_resume</code></td>
       <td><code>/afterglow resume &lt;slug&gt;</code></td>
       <td>Re-activate a <code>paused</code> / <code>draft</code> / <code>learning</code> agent without re-signing. Use after <code>archive → restore</code>, or when the original consent is still valid and you just need the agent live again. Refuses <code>archived</code> — restore first.
         <br><sub>⚠ <code>resume</code> <b>bypasses</b> the consent gate (you assert the existing consent is still valid). For a fresh signature, use <code>sign</code>.</sub></td>
+    </tr>
+    <tr>
+      <td><code>afterglow_handoff</code></td>
+      <td><code>/afterglow handoff &lt;slug&gt; --action start|review|status|finalize|abort</code></td>
+      <td><b>Self-review onboarding.</b> The departing person walks through N sample questions and marks each <code>keep</code> / <code>edit</code> / <code>decline</code>. Optional <code>questions.txt</code> from coworkers (must live in the agent folder or CWD — arbitrary absolute paths are rejected). Finalising signs <code>consent.md</code>, flips to <code>active</code>, and absorbs <code>edit</code>-ed answers into <code>persona.bio</code> under <code>## handoff 답변</code> and <code>decline</code>-d ones under <code>## 답하지 않기로 한 영역</code> so the next <code>ask</code> cites them first.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_correct</code></td>
+      <td><code>/afterglow correct &lt;slug&gt; --action feedback|edit-answer|save-rule|list</code></td>
+      <td>Apply manual confidence correction to an <code>ask</code> result: natural-language <code>feedback</code>, direct <code>edit-answer</code>, or pattern-based <code>save-rule</code>. All entries accumulate in <code>corrections.log</code> + <code>history.log</code> + <code>audit</code>.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_version</code></td>
+      <td><code>/afterglow version &lt;slug&gt; --action list|diff|rollback|tag|snapshot</code></td>
+      <td>persona version history. Auto-snapshots before every <code>edit</code> / <code>sign</code> / <code>recalibrate apply</code> / <code>handoff finalize</code>. <code>diff</code> compares two versions, <code>rollback</code> restores one (safety snapshot taken first), <code>tag</code> labels (<code>stable</code>, <code>handoff-signed</code>), <code>snapshot</code> is manual. Stored under <code>agents/&lt;slug&gt;/.versions/</code>.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_access</code></td>
+      <td><code>/afterglow access &lt;slug&gt; --action list|allow|deny|remove|set-default|check</code></td>
+      <td><code>user:</code> / <code>role:</code> / <code>team:</code> grained allow & deny lists + default policy. When <code>ask</code> is called with a <code>caller</code> argument, the policy is checked automatically (anonymous calls skip). <code>check</code> safely simulates.</td>
     </tr>
     <tr>
       <td><code>afterglow_list</code></td>
@@ -234,7 +257,11 @@ Patch any subset of: `name` · `role` · `tenure` · `bio` · `addExpertise` / `
    ├─ mcp-allowlist.yml      ← (reserved) per-agent MCP allowlist
    ├─ consent.md             ← signature flips status draft → active
    ├─ history.log            ← call / feedback / edit trail
-   ├─ knowledge/             ← raw sources (PDF · MD · TXT · CSV · JSONL)
+   ├─ access.json            ← call permission policy (afterglow_access)
+   ├─ handoff.json           ← self-review session state (afterglow_handoff)
+   ├─ corrections.log        ← user corrections trail (afterglow_correct)
+   ├─ .versions/             ← persona snapshots (afterglow_version)
+   ├─ knowledge/             ← raw sources (.md · .txt · .csv · .jsonl only; convert PDFs first)
    └─ embeddings/            ← RAG index (PoC: TF-IDF terms; future: dense vectors)
 ```
 
@@ -254,8 +281,8 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (74 tests)
-npm run test:stdio         # real MCP stdio handshake (all 14 tools + archive round-trip + chain verify)
+npm test                   # vitest (135 tests — storage 12 + tools 29 + phase4 33 + phase6 61)
+npm run test:stdio         # real MCP stdio handshake (all 18 tools + archive round-trip + chain verify)
 npm run test:all           # unit → build → stdio
 ```
 
@@ -274,22 +301,27 @@ server/
 │     ├─ create.ts
 │     ├─ sign.ts
 │     ├─ resume.ts          ← 1-step re-activation, consent gate bypass
+│     ├─ handoff.ts         ← self-review onboarding (start/review/status/finalize/abort)
 │     ├─ list.ts
 │     ├─ inspect.ts
-│     ├─ ask.ts
-│     ├─ edit.ts
+│     ├─ ask.ts             ← caller arg gates ask via access policy
+│     ├─ edit.ts            ← auto-snapshots persona before mutation
 │     ├─ council.ts
 │     ├─ council_summary.ts
 │     ├─ history.ts
 │     ├─ audit.ts
-│     ├─ recalibrate.ts ← global + by-topic (expertise-aware)
-│     ├─ archive.ts     ← archive / restore / list
-│     └─ types.ts       ← ToolReply + safe() wrapper
+│     ├─ recalibrate.ts     ← global + by-topic (expertise-aware) + auto-snapshot
+│     ├─ correct.ts         ← feedback / edit-answer / save-rule
+│     ├─ archive.ts         ← archive / restore / list
+│     ├─ version.ts         ← list / diff / rollback / tag / snapshot
+│     ├─ access.ts          ← user:/role:/team: allow/deny + check
+│     └─ types.ts           ← ToolReply + safe() wrapper
 ├─ test/
 │  ├─ storage.test.ts   ← vitest (12 tests)
 │  ├─ tools.test.ts     ← vitest (29 tests — v0.1.1 tools + RAG + edge cases)
 │  ├─ phase4.test.ts    ← vitest (33 tests — archive / council_summary / by-topic / resume + regressions)
-│  └─ stdio.smoke.mjs   ← live MCP handshake against all 14 tools + archive round-trip
+│  ├─ phase6.test.ts    ← vitest (61 tests — handoff / version / access / correct + P0 security regressions)
+│  └─ stdio.smoke.mjs   ← live MCP handshake against all 18 tools + archive round-trip
 ├─ tsconfig.json
 ├─ vitest.config.ts
 └─ package.json
@@ -309,9 +341,22 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 
 The `embeddings/` folder is created by `init` precisely so the on-disk shape is already there when you swap in vectors.
 
+## ⚠ Known PoC limits
+
+| Area | Current behaviour | What you'd add for production |
+| --- | --- | --- |
+| **Identity** | `signer` recorded verbatim — no SSO/MFA | Wrap with corporate SSO tokens / HR approval |
+| **RAG indexing** | `.md`/`.txt`/`.csv`/`.jsonl` only — no PDF | Convert PDFs to `.md` externally before drop-in |
+| **`audit.log` scale** | Every verify reads the whole file and re-hashes | At tens of thousands of rows, add chunked checkpoints |
+| **`.versions/` retention** | Every edit/sign/handoff/rollback is permanent | Periodic manual pruning (`rm` + sync `tags.json`) |
+| **`afterglow_correct` ACL** | `access.json` gates `ask` only | Add per-tool ACL wrapper for production |
+| **GDPR delete** | `archive` moves to `archive/<slug>/` only | Manual `rm -rf` + registry edit after retention |
+| **Multi-process** | In-process locks only — single stdio server | Externalise to Redis/DB mutex for distributed runs |
+| **Side-log integrity** | Only `audit.log` is hash-chained | Hash sibling files into audit `meta` |
+
 ## 🗺 Roadmap
 
-- [x] 14 tools shipped: init · create · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive
+- [x] 18 tools shipped: init · create · handoff · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · correct · archive · version · access
 - [x] zod persona schema + auto-rendered system prompt
 - [x] TF-IDF RAG (offline · zero deps)
 - [x] SHA-256 hash-chained audit log + verifier
@@ -319,7 +364,7 @@ The `embeddings/` folder is created by `init` precisely so the on-disk shape is 
 - [x] Recalibrate: global + **expertise-aware by-topic** diagnostic
 - [x] **`afterglow_archive`** — archive + restore agents
 - [x] **Council moderator** — stronger consensus rules + `afterglow_council_summary` auto-summarizer
-- [x] 74 vitest tests + full stdio handshake smoke (covers all 14 tools)
+- [x] 135 vitest tests + full stdio handshake smoke (covers all 18 tools)
 - [ ] Web companion: shareable read-only "afterglow page" per agent
 - [ ] Slack integration
 
