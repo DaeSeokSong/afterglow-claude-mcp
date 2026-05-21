@@ -1,16 +1,42 @@
 {
-  "name": "@afterglow/mcp-server",
+  "name": "@daeseoksong/afterglow-mcp",
   "version": "0.1.0",
-  "private": true,
   "description": "Afterglow MCP server — manage 퇴사자 에이전트 폴더 + persona + RAG, surfaced as Claude Code slash commands.",
   "type": "module",
+  "license": "MIT",
+  "author": "DaeSeokSong (https://github.com/DaeSeokSong)",
+  "homepage": "https://github.com/DaeSeokSong/Afterglow/tree/main/server#readme",
+  "bugs": {
+    "url": "https://github.com/DaeSeokSong/Afterglow/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DaeSeokSong/Afterglow.git",
+    "directory": "server"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude",
+    "claude-code",
+    "anthropic",
+    "afterglow",
+    "agent",
+    "persona",
+    "rag",
+    "offboarding"
+  ],
   "bin": {
     "afterglow-mcp": "./dist/index.js"
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
@@ -18,7 +44,8 @@
     "start": "node dist/index.js",
     "test": "vitest run",
     "test:stdio": "node test/stdio.smoke.mjs",
-    "test:all": "npm run test && npm run build && npm run test:stdio"
+    "test:all": "npm run test && npm run build && npm run test:stdio",
+    "prepublishOnly": "npm run build && npm run test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",

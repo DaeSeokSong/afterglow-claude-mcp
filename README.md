@@ -1,176 +1,307 @@
-# Afterglow — 퇴사자 에이전트 MCP
+<div align="center">
 
-> 퇴사한 동료를 폴더 안에 두고, Claude Code 안에서 다시 만나는 페르소나 에이전트 MCP.
+# Afterglow
 
-이 저장소는 두 부분으로 구성됩니다.
+**퇴사한 동료를 폴더 하나로 — Claude Code 안에서 다시 만나는 페르소나 에이전트 MCP**
 
-| 폴더 | 내용 |
-| --- | --- |
-| `/` (루트) | Claude Design 핸드오프 → Vite + React 19 로 옮긴 **인터랙티브 제안서**. 18개 CLI 화면 모킹을 통해 사용자가 전체 흐름을 둘러볼 수 있어요. |
-| `/server` | **실제 동작하는 MCP 서버** (`@afterglow/mcp-server`). Claude Code에 등록하면 `/afterglow init / create / list / inspect / ask` 5 개 슬래시 명령이 동작합니다. |
+<p>
+  <a href="https://www.npmjs.com/package/@daeseoksong/afterglow-mcp"><img alt="npm version" src="https://img.shields.io/npm/v/@daeseoksong/afterglow-mcp.svg?style=flat-square&color=B5482C&labelColor=29261b&label=mcp%20server"></a>
+  <a href="https://www.npmjs.com/package/@daeseoksong/afterglow-mcp"><img alt="npm downloads" src="https://img.shields.io/npm/dm/@daeseoksong/afterglow-mcp.svg?style=flat-square&color=B5482C&labelColor=29261b"></a>
+  <a href="./LICENSE"><img alt="license" src="https://img.shields.io/github/license/DaeSeokSong/Afterglow.svg?style=flat-square&color=1F4A48&labelColor=29261b"></a>
+  <a href="https://github.com/DaeSeokSong/Afterglow/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/DaeSeokSong/Afterglow?style=flat-square&color=B58A2C&labelColor=29261b"></a>
+  <a href="https://github.com/DaeSeokSong/Afterglow/commits/main"><img alt="last commit" src="https://img.shields.io/github/last-commit/DaeSeokSong/Afterglow?style=flat-square&color=6B3F2E&labelColor=29261b"></a>
+  <a href="https://github.com/DaeSeokSong/Afterglow/issues"><img alt="open issues" src="https://img.shields.io/github/issues/DaeSeokSong/Afterglow?style=flat-square&color=4A3B6B&labelColor=29261b"></a>
+</p>
 
-## 핵심 컨셉
+<p>
+  <img alt="Vite" src="https://img.shields.io/badge/Vite-8-646cff?style=flat-square&logo=vite&labelColor=29261b">
+  <img alt="React" src="https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react&labelColor=29261b">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-strict-3178c6?style=flat-square&logo=typescript&labelColor=29261b">
+  <img alt="MCP SDK" src="https://img.shields.io/badge/MCP_SDK-1.29-4A3B6B?style=flat-square&labelColor=29261b">
+  <img alt="Node" src="https://img.shields.io/badge/Node-%E2%89%A518-5A7A3D?style=flat-square&logo=node.js&labelColor=29261b">
+</p>
 
-- **학습이 아니라 페르소나 + RAG.** Claude의 컨텍스트에 톤과 자료를 주입 — 모델 학습 없이 Claude Code와 100% 호환.
-- **한 폴더에 한 사람.** `~/.claude/afterglow/agents/<slug>/` 안에 persona.json · system-prompt.md · knowledge/ · embeddings/ · consent.md · history.log.
-- **모든 작업은 CLI.** 웹 UI 없이 슬래시 명령으로 끝납니다 (`/afterglow init`, `/afterglow create`, `/afterglow ask`, …).
-- **서로 알고, 서로 답합니다.** 명시적 회의(council)와 답변 도중 자발적 협의(peer-ask) 모두 회의록으로 저장.
-- **가짜인 척하지 않습니다.** 모든 답변에 ✦ 마크 + 신뢰도 + 출처가 함께.
+<p>
+  <a href="#-tldr"><b>30초 요약</b></a> ·
+  <a href="#-한-줄-설치-mcp-서버">설치</a> ·
+  <a href="#-인터랙티브-제안서-프론트">디자인 모킹</a> ·
+  <a href="#-키보드--네비게이션">단축키</a> ·
+  <a href="#-폴더-구조">폴더 구조</a> ·
+  <a href="#-roadmap">로드맵</a> ·
+  <a href="./server/README.md"><b>MCP 서버 →</b></a>
+</p>
 
-## 기술 스택
+</div>
 
-| 영역 | 선택 |
-| --- | --- |
-| 빌드 | Vite 8 |
-| 런타임 | React 19 (Client SPA) |
-| 언어 | TypeScript ~6, `verbatimModuleSyntax` + `erasableSyntaxOnly` |
-| 라우팅 | hash 기반 (외부 의존 0) |
-| 스타일 | 디자이너 작성 CSS (`src/styles/design.css`, ~87KB) + CSS 변수로 액센트 · 배경 토글 |
-| 폰트 | Pretendard · Newsreader · Noto Serif KR · JetBrains Mono (CDN) |
-| 린트 | ESLint flat config (`react-hooks` + `react-refresh` + `typescript-eslint`) |
-| 유틸 | `clsx` |
+---
 
-> Tailwind는 일부러 도입하지 않았습니다. 디자이너가 작성한 87KB의 토큰 기반 CSS가 이미 잘 동작하고, 다시 Tailwind로 치환하는 비용 대비 이득이 없다고 판단했습니다.
-
-## 빠른 시작
+## ⏱ TL;DR
 
 ```bash
-# 의존성 설치
+claude mcp add afterglow npx -y @daeseoksong/afterglow-mcp
+claude /afterglow init
+claude /afterglow create jiyoon --name 이지윤 --role "프로덕트 디자이너"
+claude /afterglow ask jiyoon "온보딩 step 3 이탈, 어떻게 줄였어요?"
+```
+
+```
+✦ step 3 이탈은 사실 step 3 잘못이 아니었어요. step 2 설명을 절반으로
+  줄였더니 22% → 9%로 떨어졌어요.                — 이지윤 · 신뢰도 91%
+
+  ↗ Confluence · DESIGN/onboarding-v2-postmortem
+  ↗ ./materials/interview-2025-11-10.pdf · p. 14
+```
+
+> 모델 fine-tune 없이 **페르소나 + RAG** 만으로 Claude Code 와 100% 호환. 추가 GPU · 임베딩 API · 외부 서버 0원.
+
+---
+
+## 🗂 이 저장소는 두 부분으로 구성됩니다
+
+<table>
+  <thead>
+    <tr>
+      <th width="50%">📐 <code>/</code> 인터랙티브 제안서 (프론트)</th>
+      <th width="50%">⚙ <code>/server</code> 실제 MCP 서버</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
+        Claude Design 핸드오프 → <b>Vite 8 + React 19</b> 마이그레이션.<br>
+        18 개의 CLI 화면 모킹으로 전체 시스템 흐름을 사용자에게 보여주는 인터랙티브 데모.
+      </td>
+      <td>
+        <a href="https://www.npmjs.com/package/@daeseoksong/afterglow-mcp"><code>@daeseoksong/afterglow-mcp</code></a> npm 패키지.<br>
+        Claude Code에 등록하면 <code>/afterglow init / create / list / inspect / ask</code> 5 개 슬래시 명령이 동작.
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <code>npm install && npm run dev</code> → <code>http://localhost:5173</code>
+      </td>
+      <td>
+        <code>claude mcp add afterglow npx -y @daeseoksong/afterglow-mcp</code>
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+---
+
+## ✦ 한 줄 설치 (MCP 서버)
+
+```bash
+claude mcp add afterglow npx -y @daeseoksong/afterglow-mcp
+```
+
+이어서 첫 사용 (4 줄):
+
+```bash
+claude /afterglow init                                                # ~/.claude/afterglow/ 부트스트랩
+claude /afterglow create jiyoon --name 이지윤 --role "프로덕트 디자이너"
+claude /afterglow list
+claude /afterglow ask jiyoon "..."
+```
+
+자세한 내용은 [`server/README.md`](./server/README.md) 참고.
+
+## 📐 인터랙티브 제안서 (프론트)
+
+전체 시스템을 어떻게 쓰는지 한 번에 둘러보는 18 개의 CLI 화면 모킹:
+
+```bash
 npm install
-
-# 개발 서버 (http://localhost:5173)
-npm run dev
-
-# 프로덕션 빌드
-npm run build
-
-# 빌드 결과 미리보기
-npm run preview
-
-# 타입 체크
-npm run typecheck
-
-# 린트
-npm run lint
+npm run dev      # → http://localhost:5173
 ```
-
-## 폴더 구조
-
-```text
-src/
-├─ App.tsx                # SCREENS 라우팅 + 사이드바 + 톱바 + Tweaks 패널
-├─ main.tsx               # ReactDOM.createRoot 진입점
-├─ components/
-│  ├─ Icon.tsx            # 인라인 SVG 아이콘 24종
-│  ├─ ui.tsx              # BrandMark / Avatar / Badge / Steps / Spark / UploadSlot
-│  ├─ Terminal.tsx        # 터미널 셸 + CLI 프리미티브 (T.Prompt, T.Block, T.Frame …)
-│  └─ TweaksPanel.tsx     # 우하단 떠 있는 디자인 토글 패널
-├─ lib/
-│  └─ tweaks.ts           # localStorage 기반 useTweaks 훅
-├─ screens/               # 18개 화면 — 1 파일에 1~4 컴포넌트
-│  ├─ Overview.tsx        # 둘러보기 (intro + 폴더 구조 + 호출 방식)
-│  ├─ CliInit.tsx         # ScreenInit  / ScreenCreate
-│  ├─ CliView.tsx         # ScreenList  / ScreenInspect
-│  ├─ CliChat.tsx         # ScreenAsk   / ScreenCouncil / ScreenLog
-│  ├─ CliEdit.tsx         # ScreenEdit
-│  ├─ CliFeatures.tsx     # ScreenSelfReview / ScreenVersion / ScreenLogViewer / ScreenAccess
-│  ├─ CliCompliance.tsx   # ScreenAudit / ScreenManualFix / ScreenAutoFix
-│  ├─ Roadmap.tsx
-│  └─ Ethics.tsx
-└─ styles/
-   └─ design.css          # 디자이너 작성 CSS (디자인 토큰 · 레이아웃 · 터미널 셸)
-
-server/                  # 실제 MCP 서버 — server/README.md 참고
-├─ src/index.ts          # MCP stdio 진입점 (5 tools)
-├─ src/storage.ts        # ~/.claude/afterglow/ 파일시스템 어댑터
-├─ src/persona.ts        # zod schema + system-prompt 렌더링
-├─ src/rag.ts            # 키워드 기반 RAG (PoC)
-├─ src/tools/            # init · create · list · inspect · ask
-└─ test/                 # vitest + stdio 핸드셰이크
-
-docs/
-└─ design-source/        # claude.ai/design 핸드오프 원본 (JSX) — 참조용
-```
-
-## 18개 화면 매핑
 
 | 그룹 | 화면 | 슬래시 명령 |
 | --- | --- | --- |
 | 한눈에 | 둘러보기 | (intro) |
-| 셋업 · 인계 | 처음 설치 | `/afterglow init` |
-| 셋업 · 인계 | 에이전트 만들기 | `/afterglow create` |
-| 셋업 · 인계 | 본인 인계 모드 | `/afterglow handoff` |
-| 매일 쓰는 명령 | 목록 | `/afterglow list` |
-| 매일 쓰는 명령 | 질문하기 | `/afterglow ask` |
-| 매일 쓰는 명령 | 상세 보기 | `/afterglow inspect` |
-| 매일 쓰는 명령 | 에이전트 수정 | `/afterglow edit` |
-| 매일 쓰는 명령 | 대화 로그 뷰어 | `/afterglow history` |
-| 에이전트끼리 | 합동 회의 | `/afterglow council` |
-| 에이전트끼리 | 회의록 다시 보기 | `/afterglow log` |
-| 운영 / 관리 | 버전 관리 | `/afterglow version` |
-| 운영 / 관리 | 권한 관리 | `/afterglow access` |
-| 운영 / 관리 | 감사 로그 | `/afterglow audit` |
-| 운영 / 관리 | 신뢰도 수동 보정 | `/afterglow correct` |
-| 운영 / 관리 | 신뢰도 자동 보정 | `/afterglow recalibrate` |
-| 참고 | 로드맵 | — |
-| 참고 | 윤리 가이드 | — |
+| 셋업 · 인계 | 처음 설치 / 에이전트 만들기 / 본인 인계 모드 | `init` · `create` · `handoff` |
+| 매일 쓰는 명령 | 목록 / 질문 / 상세 / 수정 / 대화 로그 | `list` · `ask` · `inspect` · `edit` · `history` |
+| 에이전트끼리 | 합동 회의 / 회의록 다시 보기 | `council` · `log` |
+| 운영 · 관리 | 버전 / 권한 / 감사 / 신뢰도 수동 · 자동 | `version` · `access` · `audit` · `correct` · `recalibrate` |
+| 참고 | 로드맵 / 윤리 가이드 | — |
 
-## 라우팅
-
-`location.hash`를 단일 source-of-truth로 사용합니다.
-
-- `/#init`, `/#ask`, `/#audit` 처럼 화면 ID로 직접 진입 가능
-- 사이드바 클릭 시 hash 갱신
-- `hashchange` 이벤트로 양방향 동기화
-
-별도의 라우터 라이브러리를 두지 않습니다 — 화면이 18개로 작고, 데이터 페칭이 없는 정적 SPA이기 때문입니다.
-
-## 키보드 / 네비게이션
+## ⌨ 키보드 / 네비게이션
 
 | 단축키 | 동작 |
 | --- | --- |
-| `⌘ K` / `Ctrl K` | 명령 팔레트 (전체 18 화면 fuzzy 검색) |
-| `g + l/a/i/c/e/h/o/v` | 빠른 점프 (list / ask / inspect / create / edit / history / overview / version) |
-| `[` / `]` | 이전 / 다음 화면 |
-| `?` | 명령 팔레트 (도움말 단축) |
+| <kbd>⌘ K</kbd> / <kbd>Ctrl K</kbd> / <kbd>?</kbd> | 명령 팔레트 (18 화면 fuzzy 검색) |
+| <kbd>g</kbd> + <kbd>l/a/i/c/e/h/o/v</kbd> | 빠른 점프 (list / ask / inspect / create / edit / history / overview / version) |
+| <kbd>[</kbd> / <kbd>]</kbd> | 이전 / 다음 화면 |
 
-- 화면 하단 prev/next 점프 버튼 + 톱바 ←/→ 버튼
-- 본문 안의 `T.Cmd` 또는 helper card `h-cmd` 스니펫이 `/afterglow <verb>` 패턴이면 클릭 시 해당 화면으로 이동
-- 에이전트 chip (`T.Agent`) 클릭 시 상세 보기로 이동
+- 본문의 `T.Cmd` 또는 helper card 의 `/afterglow <verb>` 스니펫 클릭 → 해당 화면으로 이동
+- 에이전트 chip (`T.Agent`) 클릭 → 상세 보기로 이동
+- 톱바 ←/→ 버튼, 푸터 prev/next 점프 카드
 
-## 실제 MCP 서버 (`/server`)
+## 🧭 핵심 컨셉
+
+- **🪶 학습이 아니라 페르소나 + RAG.** Claude의 컨텍스트에 톤과 자료를 함께 주입 — fine-tune 없이 Claude Code 와 100% 호환.
+- **📁 한 폴더에 한 사람.** `~/.claude/afterglow/agents/<slug>/` 안에 `persona.json` · `system-prompt.md` · `knowledge/` · `embeddings/` · `consent.md` · `history.log`.
+- **⌨ 모든 작업은 CLI.** 웹 UI 없이 슬래시 명령으로 끝납니다.
+- **🤝 서로 알고, 서로 답합니다.** 명시적 회의(council) · 답변 도중 자발적 협의(peer-ask) 모두 회의록으로 저장.
+- **🔒 가짜인 척하지 않습니다.** 모든 답변에 ✦ 마크 + 신뢰도 + 출처가 함께.
+
+## 🔧 동작 원리
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 사용자
+    participant CC as Claude Code
+    participant MCP as Afterglow MCP
+    participant FS as ~/.claude/afterglow/
+
+    U->>CC: claude /afterglow ask jiyoon "..."
+    CC->>MCP: tools/call afterglow_ask
+    MCP->>FS: persona.json + system-prompt.md
+    MCP->>FS: knowledge/ retrieval (RAG)
+    MCP-->>CC: 페르소나 + 검색된 청크
+    Note over CC: Claude 가 자기 세션으로 답변 생성<br/>(별도 모델 호출 없음)
+    CC-->>U: ✦ 답변 + 신뢰도 + 출처
+```
+
+**`afterglow_ask` 는 LLM 을 호출하지 않습니다.** 페르소나 system-prompt + RAG 결과를 구조화된 텍스트로 묶어 반환하면, Claude Code 가 자기 컨텍스트로 직접 답변을 생성합니다. → 추가 모델 / GPU / 임베딩 API 0원.
+
+## 🛠 기술 스택
+
+<table>
+<tr><th>영역</th><th>선택</th><th>이유</th></tr>
+<tr><td>빌드 (프론트)</td><td>Vite 8</td><td>SPA에 가장 빠른 HMR · 의존성 최소</td></tr>
+<tr><td>런타임 (프론트)</td><td>React 19</td><td>표준 + 새 set-state-in-effect lint</td></tr>
+<tr><td>언어</td><td>TypeScript ~6 (strict)</td><td><code>verbatimModuleSyntax</code> + <code>erasableSyntaxOnly</code></td></tr>
+<tr><td>스타일</td><td>디자이너 작성 87KB <code>design.css</code></td><td>Tailwind 미도입 — 토큰 기반 커스텀 디자인 보존</td></tr>
+<tr><td>폰트</td><td>Pretendard · Newsreader · Noto Serif KR · JetBrains Mono</td><td>"한지·잉크·터미널" 컨셉</td></tr>
+<tr><td>라우팅</td><td>hash 기반 자체 구현</td><td>18 화면 정적 SPA — 외부 라우터 불필요</td></tr>
+<tr><td>MCP 서버</td><td>@modelcontextprotocol/sdk 1.29 (stdio)</td><td>Claude Code 표준 등록 방식</td></tr>
+<tr><td>스키마</td><td>zod 3</td><td>persona.json 런타임 검증</td></tr>
+<tr><td>테스트</td><td>vitest 2 + stdio 핸드셰이크</td><td>단위 + 실제 MCP 프로토콜 모두 검증</td></tr>
+</table>
+
+## 📁 폴더 구조
+
+<details>
+<summary><b>저장소 전체</b></summary>
+
+```
+Afterglow/
+├─ src/                    ← Vite + React 프론트 (인터랙티브 제안서)
+│  ├─ App.tsx              ← 18 화면 라우팅 + 단축키 + Cmd+K 팔레트
+│  ├─ main.tsx
+│  ├─ components/          ← Icon · ui · Terminal + T.* · TweaksPanel · CommandPalette
+│  ├─ lib/
+│  │  ├─ navigation.ts     ← screenForCommand · SCREEN_ENTRIES · neighbor
+│  │  └─ tweaks.ts         ← localStorage 백킹 useTweaks 훅
+│  ├─ screens/             ← 18 개 화면 컴포넌트 (9 파일)
+│  └─ styles/design.css    ← 디자이너 작성 토큰 + 터미널 셸
+│
+├─ server/                 ← 실제 MCP 서버 (@daeseoksong/afterglow-mcp)
+│  ├─ src/
+│  │  ├─ index.ts          ← stdio 진입점 (McpServer + StdioServerTransport)
+│  │  ├─ storage.ts        ← ~/.claude/afterglow/ 파일시스템 어댑터
+│  │  ├─ persona.ts        ← zod schema + 시스템 프롬프트 렌더링
+│  │  ├─ rag.ts            ← 키워드 기반 RAG (drop-in 교체 지점)
+│  │  └─ tools/            ← init · create · list · inspect · ask
+│  └─ test/                ← vitest + stdio 핸드셰이크
+│
+└─ docs/
+   └─ design-source/       ← claude.ai/design 핸드오프 원본 (JSX) — 참조용
+```
+
+</details>
+
+<details>
+<summary><b><code>~/.claude/afterglow/</code> 런타임 폴더</b></summary>
+
+```
+~/.claude/afterglow/
+├─ config.yml                ← 환경 설정 (embedding model · storage root)
+├─ registry.json             ← 전체 에이전트 인덱스
+├─ councils/                 ← council + peer-ask 회의록
+└─ agents/<slug>/
+   ├─ persona.json
+   ├─ system-prompt.md
+   ├─ mcp-allowlist.yml
+   ├─ consent.md
+   ├─ history.log
+   ├─ knowledge/             ← 원본 자료 (PDF · MD · TXT · CSV · JSONL)
+   └─ embeddings/            ← RAG 인덱스
+```
+
+</details>
+
+## 🧪 개발
 
 ```bash
+# 프론트 (인터랙티브 제안서)
+npm install
+npm run dev          # http://localhost:5173
+npm run typecheck
+npm run lint
+npm run build
+
+# MCP 서버
 cd server
 npm install
 npm run build
-npm test                        # 12 vitest tests
-npm run test:stdio              # 실제 MCP stdio 핸드셰이크 검증
+npm test             # 12 vitest tests
+npm run test:stdio   # 실제 MCP stdio 핸드셰이크
+npm run test:all     # 전체 (unit → build → stdio)
 ```
 
-Claude Code 에 로컬 등록:
+## 🗺 Roadmap
+
+### 현재 (v0.1)
+- [x] 18 화면 인터랙티브 제안서 (Vite + React 19 + TS)
+- [x] Cmd+K 팔레트 + 키보드 단축키 + 화면 간 클릭 네비
+- [x] MCP 서버 5 도구 (`init` · `create` · `list` · `inspect` · `ask`)
+- [x] persona zod schema + 시스템 프롬프트 자동 렌더링
+- [x] PoC 수준 키워드 RAG
+- [x] vitest 12 + stdio 핸드셰이크 smoke test
+- [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
+
+### 다음
+- [ ] `afterglow_edit` — persona 부분 수정 도구
+- [ ] `afterglow_council` — 다중 에이전트 회의 + 회의록 저장
+- [ ] `afterglow_history` — `history.log` 조회
+- [ ] dense vector RAG backend (`embeddings/` 활용)
+- [ ] `consent.md` 서명 워크플로우 (draft → active 게이트)
+- [ ] 감사 로그 · 신뢰도 자동 보정 (디자인엔 있고 서버엔 미구현)
+
+[기여 환영](https://github.com/DaeSeokSong/Afterglow/issues/new) — 이슈 / PR / 사용 사례 모두 좋아요.
+
+## 🤝 Contributing
 
 ```bash
-claude mcp add afterglow node $(pwd)/server/dist/index.js
-claude /afterglow init
-claude /afterglow create jiyoon --name 이지윤 --role "프로덕트 디자이너"
-claude /afterglow list
+# fork 후
+git clone https://github.com/<your>/Afterglow.git
+cd Afterglow
+
+# 프론트 변경
+npm install
+npm run dev
+
+# 서버 변경
+cd server && npm install && npm test
 ```
 
-자세한 내용은 [server/README.md](server/README.md) 참고. 핵심 설계:
+PR 전 체크:
+- [ ] 루트: `npm run typecheck && npm run lint && npm run build`
+- [ ] 서버: `npm run test:all`
+- [ ] 의미 있는 단위 (Phase / 기능별)로 commit
 
-- **`afterglow_ask` 는 LLM 을 호출하지 않습니다.** 페르소나 시스템 프롬프트 + RAG 검색 결과를 구조화된 텍스트로 묶어 반환하면, Claude Code 가 자기 컨텍스트로 직접 답변합니다.
-- 모든 데이터는 `~/.claude/afterglow/` 안의 일반 파일 (백업·이동·삭제·인계 단순).
-- RAG 는 PoC 수준의 키워드 매칭. `embeddings/` 폴더와 `rag.ts` 의 `retrieve()` 가 dense vector backend drop-in 자리.
+## 📜 License
 
-## 톤 / 디자인 토글
+[MIT](./LICENSE) © [DaeSeokSong](https://github.com/DaeSeokSong)
 
-우하단 톱니 버튼을 누르면 Tweaks 패널이 열리고, **액센트** 색과 **배경(종이)** 색을 4가지 프리셋 중에서 고를 수 있습니다. 선택값은 `localStorage["afterglow.tweaks"]`에 저장되며 CSS 변수 `--brick` · `--paper`에 즉시 반영됩니다.
+---
 
-## 디자인 원본
+<div align="center">
 
-`docs/design-source/`에는 claude.ai/design에서 export 한 원본 HTML/CSS/JSX 핸드오프 번들이 그대로 보존되어 있습니다. 추가 화면을 만들거나 디자인 의도를 다시 확인할 때 참고할 수 있습니다.
+**[GitHub](https://github.com/DaeSeokSong/Afterglow) · [npm](https://www.npmjs.com/package/@daeseoksong/afterglow-mcp) · [Issues](https://github.com/DaeSeokSong/Afterglow/issues) · [MCP 서버 상세](./server/README.md)**
 
-## 라이선스
+Made with ✦ for 퇴사하셨지만 아직 우리 곁에 있는 동료들에게.
 
-MIT — `LICENSE` 파일 참고.
+</div>
