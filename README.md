@@ -258,7 +258,7 @@ npm run test:all     # 전체 (unit → build → stdio)
 
 ## 🗺 Roadmap
 
-### 현재 (v0.1.1)
+### 현재 (v0.1.2)
 - [x] 18 화면 인터랙티브 제안서 (Vite + React 19 + TS)
 - [x] Cmd+K 팔레트 + 키보드 단축키 + 화면 간 클릭 네비
 - [x] **MCP 서버 11 도구**: `init` · `create` · `sign` · `list` · `inspect` · `ask` · `edit` · `council` · `history` · `audit` · `recalibrate`

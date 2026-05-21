@@ -39,7 +39,7 @@ import { auditShape, runAudit } from './tools/audit.js';
 import { recalibrateShape, runRecalibrate } from './tools/recalibrate.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.1.1';
+const SERVER_VERSION = '0.1.2';
 
 export function buildServer(): McpServer {
   const server = new McpServer(

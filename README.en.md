@@ -264,7 +264,7 @@ npm run test:all     # unit → build → stdio
 
 ## 🗺 Roadmap
 
-### Now (v0.1.1)
+### Now (v0.1.2)
 - [x] 18-screen interactive proposal (Vite + React 19 + TS)
 - [x] Cmd+K palette + keyboard shortcuts + cross-screen click navigation
 - [x] All 11 MCP tools (`init` · `create` · `sign` · `list` · `inspect` · `ask` · `edit` · `council` · `history` · `audit` · `recalibrate`)
