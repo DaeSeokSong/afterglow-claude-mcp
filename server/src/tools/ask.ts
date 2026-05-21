@@ -3,11 +3,13 @@ import {
   agentExists,
   AgentNotFoundError,
   appendHistory,
+  assertActive,
   assertInitialized,
   readPersona,
   readSystemPrompt,
 } from '../storage.js';
 import { retrieve, type Retrieval } from '../rag.js';
+import { append as auditAppend } from '../audit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const askShape = {
@@ -43,13 +45,30 @@ export async function runAsk(args: AskArgs): Promise<ToolReply> {
   if (!(await agentExists(args.slug))) {
     return errorReply(new AgentNotFoundError(args.slug).message);
   }
+  // consent gate — only active agents may answer
+  try {
+    await assertActive(args.slug);
+  } catch (e) {
+    return errorReply((e as Error).message);
+  }
 
   const persona = await readPersona(args.slug);
   const systemPrompt = await readSystemPrompt(args.slug);
   const topK = args.topK ?? 4;
   const hits = await retrieve(args.slug, args.question, topK);
 
-  await appendHistory(args.slug, `ask: "${truncate(args.question, 120)}" (${hits.length} chunks)`);
+  const confidenceEstimate = estimateConfidence(hits);
+  const isLow = confidenceEstimate < persona.peerAskThreshold;
+  await appendHistory(
+    args.slug,
+    `ask: "${truncate(args.question, 120)}" (${hits.length} chunks, confidence ${confidenceEstimate}%${isLow ? ', low-conf' : ''})`,
+  );
+  await auditAppend({
+    tool: 'afterglow_ask',
+    slug: args.slug,
+    summary: `ask · ${hits.length} chunks · confidence ${confidenceEstimate}%`,
+    meta: { topK, hits: hits.length, confidence: confidenceEstimate },
+  });
 
   const lines: string[] = [];
   lines.push(`# 호출 컨텍스트  ·  ${persona.slug}  (${persona.name})`);
@@ -77,10 +96,10 @@ export async function runAsk(args: AskArgs): Promise<ToolReply> {
   lines.push(
     `위 시스템 프롬프트의 페르소나로 답하되, 검색된 자료에 근거하여 답하세요. 자료가 부족하면 솔직히 모른다고 말하세요. 답변 끝에 ✦ 마크와 신뢰도(0–100%)를 표시하고, 사용한 자료의 번호([1], [2] 등)를 인용하세요.`,
   );
-  if (estimateConfidence(hits) < persona.peerAskThreshold) {
+  if (isLow) {
     lines.push('');
     lines.push(
-      `※ 검색 점수가 낮습니다 (~${estimateConfidence(hits)}%). 페르소나의 peer-ask 임계값(${persona.peerAskThreshold}%) 이하면, "이 부분은 ${persona.slug} 보다는 다른 에이전트가 더 잘 알 수 있어요" 라고 사용자에게 안내하세요.`,
+      `※ 검색 점수가 낮습니다 (~${confidenceEstimate}%). 페르소나의 peer-ask 임계값(${persona.peerAskThreshold}%) 이하면, "이 부분은 ${persona.slug} 보다는 다른 에이전트가 더 잘 알 수 있어요" 라고 사용자에게 안내하세요.`,
     );
   }
 
@@ -96,10 +115,12 @@ function shortPath(p: string): string {
   return p.replace(process.env.HOME ?? '', '~').replace(/\\/g, '/');
 }
 
-/** Heuristic: peak score ÷ approximate-max → 0..100. */
+/**
+ * Heuristic for TF-IDF cosine: scores are 0–1, with strong overlaps usually
+ * landing around 0.4–0.7. We map [0, 0.6] linearly to [0, 100] and saturate.
+ */
 function estimateConfidence(hits: Retrieval[]): number {
   if (hits.length === 0) return 0;
   const top = hits[0].score;
-  // assume "5+ token overlap on top chunk" ≈ 100% confidence
-  return Math.min(100, Math.round((top / 5) * 100));
+  return Math.min(100, Math.max(0, Math.round((top / 0.6) * 100)));
 }

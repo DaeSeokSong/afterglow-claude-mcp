@@ -5,6 +5,11 @@
 **퇴사한 동료를 폴더 하나로 — Claude Code 안에서 다시 만나는 페르소나 에이전트 MCP**
 
 <p>
+  <img alt="한국어" src="https://img.shields.io/badge/lang-한국어-B5482C?style=flat-square&labelColor=29261b">
+  <a href="./README.en.md"><img alt="English" src="https://img.shields.io/badge/lang-English-29261b?style=flat-square&labelColor=B5482C"></a>
+</p>
+
+<p>
   <a href="https://www.npmjs.com/package/@daeseoksong/afterglow-mcp"><img alt="npm version" src="https://img.shields.io/npm/v/@daeseoksong/afterglow-mcp.svg?style=flat-square&color=B5482C&labelColor=29261b"></a>
   <a href="https://www.npmjs.com/package/@daeseoksong/afterglow-mcp"><img alt="npm downloads" src="https://img.shields.io/npm/dm/@daeseoksong/afterglow-mcp.svg?style=flat-square&color=B5482C&labelColor=29261b"></a>
   <a href="./LICENSE"><img alt="license" src="https://img.shields.io/npm/l/@daeseoksong/afterglow-mcp.svg?style=flat-square&color=1F4A48&labelColor=29261b"></a>
@@ -88,7 +93,7 @@ sequenceDiagram
 
 **핵심**: `afterglow_ask`는 LLM을 호출하지 않습니다. 페르소나와 검색 결과를 구조화된 텍스트로 묶어 반환하고, Claude Code 가 자기 컨텍스트로 직접 답변을 생성합니다. → 추가 모델 / GPU / 임베딩 API 0원.
 
-## 🛠 도구 5개
+## 🛠 도구 11개
 
 <table>
   <thead>
@@ -107,7 +112,12 @@ sequenceDiagram
     <tr>
       <td><code>afterglow_create</code></td>
       <td><code>/afterglow create &lt;slug&gt; …</code></td>
-      <td>한 사람의 폴더 + <code>persona.json</code> + <code>system-prompt.md</code> + <code>consent.md</code> 생성. <code>registry.json</code>에 draft 등록.</td>
+      <td>한 사람의 폴더 + <code>persona.json</code> + <code>system-prompt.md</code> + <code>consent.md</code> 생성. <code>registry.json</code>에 <b>draft</b> 등록.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_sign</code></td>
+      <td><code>/afterglow sign &lt;slug&gt; --signer "…"</code></td>
+      <td><code>consent.md</code>에 서명 블록 추가 + status <b>draft → active</b> 전환. 미서명 에이전트는 <code>ask</code> / <code>council</code> 거부.</td>
     </tr>
     <tr>
       <td><code>afterglow_list</code></td>
@@ -122,7 +132,32 @@ sequenceDiagram
     <tr>
       <td><code>afterglow_ask</code></td>
       <td><code>/afterglow ask &lt;slug&gt; "..."</code></td>
-      <td>페르소나 system prompt + RAG 검색 결과를 묶어 반환. <b>Claude가 그 컨텍스트로 직접 답변.</b></td>
+      <td>페르소나 system prompt + TF-IDF RAG 검색 결과를 묶어 반환. <b>Claude가 그 컨텍스트로 직접 답변.</b> active 에이전트만 허용.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_edit</code></td>
+      <td><code>/afterglow edit &lt;slug&gt; …</code></td>
+      <td>persona.json 부분 수정 (이름·역할·소개·영역·톤·자료·MCP 권한·신뢰도). system-prompt.md 자동 재생성. <code>--dry-run</code>으로 미리보기.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_council</code></td>
+      <td><code>/afterglow council &lt;slugs…&gt; "..."</code></td>
+      <td>2–6명 에이전트의 persona + RAG 컨텍스트를 묶어 회의 브리프 + <code>councils/&lt;timestamp&gt;.md</code> 회의록 스켈레톤 생성. Claude가 turn별 발언을 진행.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_history</code></td>
+      <td><code>/afterglow history &lt;slug&gt;</code></td>
+      <td><code>history.log</code>를 시각 / 키워드 / 개수로 필터. <code>--since</code> / <code>--until</code> / <code>--filter</code> / <code>--limit</code> / <code>--json</code> / <code>--reverse</code>.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_audit</code></td>
+      <td><code>/afterglow audit</code></td>
+      <td>모든 도구 호출이 누적되는 <b>SHA-256 hash-chained audit log</b> 표시 + 체인 무결성 검증. 위변조 시 첫 깨진 seq 식별.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_recalibrate</code></td>
+      <td><code>/afterglow recalibrate &lt;slug&gt;</code></td>
+      <td><code>history.log</code> 분석 (피드백·거절·low-conf·peer-ask 비율) → <code>confidenceFloor</code> / <code>peerAskThreshold</code> 자동 조정 제안. 기본 dry-run, <code>--apply</code>로 실제 반영.</td>
     </tr>
   </tbody>
 </table>
@@ -178,6 +213,7 @@ sequenceDiagram
 | 변수 | 기본값 | 용도 |
 | --- | --- | --- |
 | `AFTERGLOW_ROOT` | `~/.claude/afterglow` | 모든 데이터의 루트. 테스트 / dev 환경 격리 시 임시 폴더 지정. |
+| `AFTERGLOW_ALLOW_DRAFT` | unset | `1` 로 설정 시 `ask` / `council`의 active 게이트 우회. 테스트/디버그 전용. |
 
 ## 🧑‍💻 Development
 
@@ -186,8 +222,8 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (12 tests)
-npm run test:stdio         # 실제 MCP stdio 핸드셰이크 검증
+npm test                   # vitest (41 tests — storage + 11 tools + edge cases)
+npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (11 도구 모두 happy-path)
 npm run test:all           # 전체 (unit → build → stdio)
 ```
 
@@ -197,19 +233,27 @@ npm run test:all           # 전체 (unit → build → stdio)
 server/
 ├─ src/
 │  ├─ index.ts          ← MCP stdio 진입점 (McpServer + StdioServerTransport)
-│  ├─ storage.ts        ← ~/.claude/afterglow/ 파일시스템 어댑터
+│  ├─ storage.ts        ← ~/.claude/afterglow/ 파일시스템 어댑터 + consent gate + history 파싱
 │  ├─ persona.ts        ← zod schema + 시스템 프롬프트 렌더링
-│  ├─ rag.ts            ← 키워드 기반 chunk retrieval (drop-in 교체 지점)
+│  ├─ rag.ts            ← TF-IDF chunk retrieval (drop-in 교체 지점)
+│  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  └─ tools/
 │     ├─ init.ts
 │     ├─ create.ts
+│     ├─ sign.ts
 │     ├─ list.ts
 │     ├─ inspect.ts
 │     ├─ ask.ts
+│     ├─ edit.ts
+│     ├─ council.ts
+│     ├─ history.ts
+│     ├─ audit.ts
+│     ├─ recalibrate.ts
 │     └─ types.ts       ← ToolReply + safe() 래퍼
 ├─ test/
 │  ├─ storage.test.ts   ← vitest (12 tests)
-│  └─ stdio.smoke.mjs   ← 실제 MCP stdio 핸드셰이크
+│  ├─ tools.test.ts     ← vitest (29 tests — 신규 6 도구 + RAG + 엣지케이스)
+│  └─ stdio.smoke.mjs   ← 실제 MCP stdio 핸드셰이크 (11 도구 happy-path)
 ├─ tsconfig.json
 ├─ vitest.config.ts
 └─ package.json
@@ -231,14 +275,16 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 
 ## 🗺 Roadmap
 
-- [x] init · create · list · inspect · ask 5 도구
-- [x] zod 스키마 + 시스템 프롬프트 렌더링
-- [x] 12 vitest + stdio 핸드셰이크
-- [ ] `afterglow_edit` — persona 부분 수정 (현재는 vim 직접 편집 권장)
-- [ ] `afterglow_council` — 다중 에이전트 회의 + 회의록 저장
-- [ ] `afterglow_history` — `agents/<slug>/history.log` 조회
-- [ ] dense vector RAG backend (embeddings/ 활용)
-- [ ] consent.md 서명 워크플로우 (draft → active 전환 게이트)
+- [x] 11 도구 전부 출시: init · create · sign · list · inspect · ask · edit · council · history · audit · recalibrate
+- [x] zod 스키마 + 시스템 프롬프트 자동 렌더링
+- [x] TF-IDF RAG (오프라인 · 외부 의존성 0)
+- [x] SHA-256 hash-chained 감사 로그 + 무결성 검증
+- [x] consent.md 서명 워크플로우 (draft → active 게이트)
+- [x] vitest 41개 + 전 도구 stdio 핸드셰이크
+- [ ] Dense-vector RAG backend (`rag.ts` drop-in)
+- [ ] Council moderator: 강화된 합의 감지 + 자동 요약
+- [ ] `afterglow_archive` — 에이전트 보관 / 복원
+- [ ] 토픽별 신뢰도 보정 (단순 threshold 아닌 expertise-aware)
 
 [기여 환영](https://github.com/DaeSeokSong/Afterglow/issues/new) — 이슈 / PR / 사용 사례 모두 좋아요.
 

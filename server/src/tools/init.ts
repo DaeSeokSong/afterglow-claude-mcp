@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { init, isInitialized } from '../storage.js';
+import { append as auditAppend } from '../audit.js';
 import { safe, type ToolReply } from './types.js';
 
 export const initShape = {
@@ -29,6 +30,11 @@ export async function runInit(args: { embeddingModel?: string }): Promise<ToolRe
   lines.push('  · /afterglow create <slug>   — 첫 에이전트 만들기');
   lines.push('  · /afterglow list             — 등록된 에이전트 보기');
 
+  await auditAppend({
+    tool: 'afterglow_init',
+    summary: wasInitialized ? 'init re-run (idempotent)' : 'init bootstrap',
+    meta: { created: result.created.length, root: result.root },
+  });
   return { content: [{ type: 'text', text: lines.join('\n') }] };
   });
 }

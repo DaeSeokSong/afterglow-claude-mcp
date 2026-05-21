@@ -143,9 +143,10 @@ describe('rag', () => {
 });
 
 describe('tools — end-to-end', () => {
-  it('init → create → list → inspect → ask round-trip', async () => {
+  it('init → create → sign → list → inspect → ask round-trip', async () => {
     const { runInit } = await import('../src/tools/init.js');
     const { runCreate } = await import('../src/tools/create.js');
+    const { runSign } = await import('../src/tools/sign.js');
     const { runList } = await import('../src/tools/list.js');
     const { runInspect } = await import('../src/tools/inspect.js');
     const { runAsk } = await import('../src/tools/ask.js');
@@ -165,6 +166,10 @@ describe('tools — end-to-end', () => {
     });
     expect(r2.isError).toBeUndefined();
     expect(r2.content[0].text).toContain('에이전트 폴더 생성');
+
+    // Flip draft → active so the ask gate lets us through.
+    const r2b = await runSign({ slug: 'jiyoon', signer: '본인' });
+    expect(r2b.isError).toBeUndefined();
 
     // Drop in a knowledge chunk so ask has something to retrieve.
     const kdir = knowledgeDir('jiyoon');

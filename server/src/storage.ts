@@ -270,6 +270,122 @@ export async function appendHistory(slug: string, line: string): Promise<void> {
 }
 
 /* --------------------------------------------------------------- */
+/* History log parsing                                             */
+/* --------------------------------------------------------------- */
+
+export interface HistoryEvent {
+  ts: string;
+  message: string;
+}
+
+export async function readHistory(slug: string): Promise<HistoryEvent[]> {
+  if (!(await agentExists(slug))) throw new AgentNotFoundError(slug);
+  const path = historyLogPath(slug);
+  let raw: string;
+  try {
+    raw = await fs.readFile(path, 'utf8');
+  } catch {
+    return [];
+  }
+  const lines = raw.split('\n').filter((l) => l.trim().length > 0);
+  // Format: `${ISO timestamp}  ${message}`
+  const out: HistoryEvent[] = [];
+  for (const line of lines) {
+    const m = line.match(/^(\S+)\s\s(.+)$/);
+    if (m) out.push({ ts: m[1], message: m[2] });
+    else out.push({ ts: '', message: line });
+  }
+  return out;
+}
+
+/* --------------------------------------------------------------- */
+/* Consent / status workflow                                       */
+/* --------------------------------------------------------------- */
+
+export class NotSignedError extends Error {
+  constructor(slug: string) {
+    super(`Agent "${slug}" is in draft state. Run /afterglow sign ${slug} --signer "..." first.`);
+    this.name = 'NotSignedError';
+  }
+}
+
+export interface SignResult {
+  signedAt: string;
+  signer: string;
+  previousStatus: RegistryEntry['status'];
+  newStatus: RegistryEntry['status'];
+}
+
+export async function signConsent(
+  slug: string,
+  signer: string,
+  note?: string,
+): Promise<SignResult> {
+  await assertInitialized();
+  if (!(await agentExists(slug))) throw new AgentNotFoundError(slug);
+
+  const reg = await readRegistry();
+  const entry = reg.agents.find((a) => a.slug === slug);
+  if (!entry) throw new AgentNotFoundError(slug);
+  const previousStatus = entry.status;
+
+  const signedAt = new Date().toISOString();
+  const block =
+    `\n## 서명\n\n` +
+    `- 서명자: ${signer}\n` +
+    `- 시각: ${signedAt}\n` +
+    (note ? `- 메모: ${note}\n` : '');
+  await fs.appendFile(consentPath(slug), block, 'utf8');
+
+  entry.status = 'active';
+  entry.trainedAt = entry.trainedAt ?? signedAt;
+  await writeRegistry(reg);
+
+  return { signedAt, signer, previousStatus, newStatus: 'active' };
+}
+
+export async function pauseAgent(slug: string): Promise<RegistryEntry['status']> {
+  await assertInitialized();
+  if (!(await agentExists(slug))) throw new AgentNotFoundError(slug);
+  const reg = await readRegistry();
+  const entry = reg.agents.find((a) => a.slug === slug);
+  if (!entry) throw new AgentNotFoundError(slug);
+  const prev = entry.status;
+  entry.status = 'paused';
+  await writeRegistry(reg);
+  return prev;
+}
+
+export async function resumeAgent(slug: string): Promise<RegistryEntry['status']> {
+  await assertInitialized();
+  if (!(await agentExists(slug))) throw new AgentNotFoundError(slug);
+  const reg = await readRegistry();
+  const entry = reg.agents.find((a) => a.slug === slug);
+  if (!entry) throw new AgentNotFoundError(slug);
+  const prev = entry.status;
+  entry.status = 'active';
+  await writeRegistry(reg);
+  return prev;
+}
+
+export async function getStatus(slug: string): Promise<RegistryEntry['status']> {
+  const reg = await readRegistry();
+  const entry = reg.agents.find((a) => a.slug === slug);
+  if (!entry) throw new AgentNotFoundError(slug);
+  return entry.status;
+}
+
+/**
+ * Gate for `afterglow_ask` (and council). Allows only `active` agents.
+ * Bypass for tests / debug: AFTERGLOW_ALLOW_DRAFT=1 disables the gate.
+ */
+export async function assertActive(slug: string): Promise<void> {
+  if (process.env.AFTERGLOW_ALLOW_DRAFT === '1') return;
+  const status = await getStatus(slug);
+  if (status !== 'active') throw new NotSignedError(slug);
+}
+
+/* --------------------------------------------------------------- */
 /* Internals                                                       */
 /* --------------------------------------------------------------- */
 

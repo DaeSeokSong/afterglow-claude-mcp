@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { readRegistry, assertInitialized } from '../storage.js';
+import { append as auditAppend } from '../audit.js';
 import { safe, type ToolReply } from './types.js';
 
 export const listShape = {
@@ -18,6 +19,11 @@ interface ListArgs {
 export async function runList(args: ListArgs): Promise<ToolReply> {
   return safe(async () => {
   await assertInitialized();
+  await auditAppend({
+    tool: 'afterglow_list',
+    summary: `list status=${args.status ?? 'all'}${args.json ? ' --json' : ''}`,
+    meta: { status: args.status ?? 'all', json: !!args.json },
+  });
   const reg = await readRegistry();
   const filter = args.status ?? 'all';
   const filtered =

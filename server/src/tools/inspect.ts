@@ -9,6 +9,7 @@ import {
 } from '../storage.js';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
+import { append as auditAppend } from '../audit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const inspectShape = {
@@ -27,6 +28,12 @@ export async function runInspect(args: InspectArgs): Promise<ToolReply> {
   if (!(await agentExists(args.slug))) {
     return errorReply(new AgentNotFoundError(args.slug).message);
   }
+  await auditAppend({
+    tool: 'afterglow_inspect',
+    slug: args.slug,
+    summary: `inspect${args.json ? ' --json' : ''}`,
+    meta: { json: !!args.json },
+  });
   const persona = await readPersona(args.slug);
 
   // Count knowledge files (1-level shallow + recursive)

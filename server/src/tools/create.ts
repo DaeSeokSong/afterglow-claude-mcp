@@ -19,6 +19,7 @@ import {
   type PersonaSeed,
   renderSystemPrompt,
 } from '../persona.js';
+import { append as auditAppend } from '../audit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const createShape = {
@@ -122,8 +123,21 @@ export async function runCreate(args: CreateArgs): Promise<ToolReply> {
   lines.push('다음 단계:');
   lines.push(`  · /afterglow inspect ${args.slug}     — 생성된 페르소나 확인`);
   lines.push(
-    `  · /afterglow ask ${args.slug} "..."    — (consent.md 서명 후) 첫 질문`,
+    `  · /afterglow sign ${args.slug} --signer "이름"   — active 전환 (ask 가능)`,
   );
+  lines.push(
+    `  · /afterglow ask ${args.slug} "..."    — 서명 후 첫 질문`,
+  );
+  await auditAppend({
+    tool: 'afterglow_create',
+    slug: args.slug,
+    summary: `created (${persona.name}, ${persona.role})`,
+    meta: {
+      expertise: persona.expertise,
+      sources: persona.sources.length,
+      mcpAllow: persona.mcpAllow,
+    },
+  });
   return { content: [{ type: 'text', text: lines.join('\n') }] };
   });
 }

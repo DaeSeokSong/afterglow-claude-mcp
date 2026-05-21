@@ -1,16 +1,17 @@
 /**
  * RAG — retrieval over knowledge/.
  *
- * PoC strategy (deliberately simple, no API keys needed):
- *   1. Walk knowledge/ for *.md / *.txt / *.json / *.jsonl
- *   2. Tokenize each file into 800-char chunks with 80-char overlap
- *   3. Score each chunk by token overlap with the user's query
- *   4. Return the top N chunks
+ * v0.1.x strategy: **TF-IDF over text chunks** (no external dependencies).
  *
- * The "real" implementation would store dense embeddings under embeddings/
- * and use cosine similarity. The MCP server signals this by writing a
- * placeholder `embeddings/STRATEGY` file on create. Swapping in a vector
- * backend is a drop-in replacement of `retrieve()` below.
+ *   1. Walk knowledge/ for *.md / *.txt / *.json / *.jsonl / *.csv
+ *   2. Tokenize into 800-char chunks with 80-char overlap
+ *   3. Compute TF-IDF weights against the agent's corpus
+ *   4. Score chunks against the user's query, return top N
+ *
+ * This is a significant accuracy upgrade over plain token overlap while
+ * keeping the package weight-free and offline-safe. The dense-vector
+ * backend (OpenAI embeddings, Voyage, bge-m3, …) is a future drop-in:
+ * the entry point is `retrieve()` and the on-disk store is `embeddings/`.
  */
 import { promises as fs } from 'node:fs';
 import { join, extname } from 'node:path';
@@ -37,13 +38,13 @@ export interface Chunk {
 
 export interface Retrieval {
   chunk: Chunk;
-  /** number of overlapping non-stopword tokens with the query */
+  /** TF-IDF score against the query (higher = more relevant) */
   score: number;
 }
 
 export function tokenize(text: string): string[] {
-  // Treat any non-letter/non-digit character as a separator. Handles Korean,
-  // English, and digits uniformly without depending on a tokenizer model.
+  // Any non-letter/non-digit character is a separator. Handles Korean,
+  // English and digits uniformly without depending on a tokenizer model.
   return text
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
@@ -84,23 +85,74 @@ export async function loadChunks(slug: string): Promise<Chunk[]> {
   return all;
 }
 
+/* --------------------------------------------------------------- */
+/* TF-IDF                                                          */
+/* --------------------------------------------------------------- */
+
+interface TermFrequency {
+  /** total term count for normalization */
+  total: number;
+  counts: Map<string, number>;
+}
+
+function termFrequencies(tokens: string[]): TermFrequency {
+  const counts = new Map<string, number>();
+  for (const t of tokens) counts.set(t, (counts.get(t) ?? 0) + 1);
+  return { total: tokens.length, counts };
+}
+
+function inverseDocumentFrequency(docTokenSets: Set<string>[]): Map<string, number> {
+  const N = docTokenSets.length;
+  const df = new Map<string, number>();
+  for (const set of docTokenSets) {
+    for (const t of set) df.set(t, (df.get(t) ?? 0) + 1);
+  }
+  const idf = new Map<string, number>();
+  for (const [t, n] of df) {
+    // add-1 smoothing to avoid IDF blowing up on rare query terms
+    idf.set(t, Math.log((N + 1) / (n + 1)) + 1);
+  }
+  return idf;
+}
+
 export async function retrieve(slug: string, query: string, topK = 4): Promise<Retrieval[]> {
   const chunks = await loadChunks(slug);
   if (chunks.length === 0) return [];
-  const qTokens = new Set(tokenize(query));
-  if (qTokens.size === 0) return [];
 
-  const scored: Retrieval[] = chunks
-    .map((chunk) => {
-      const tokens = new Set(tokenize(chunk.text));
-      let score = 0;
-      for (const t of qTokens) if (tokens.has(t)) score++;
-      return { chunk, score };
-    })
+  const qTokens = tokenize(query);
+  if (qTokens.length === 0) return [];
+
+  const docTokens = chunks.map((c) => tokenize(c.text));
+  const docSets = docTokens.map((t) => new Set(t));
+  const idf = inverseDocumentFrequency(docSets);
+
+  const qSet = new Set(qTokens);
+  const qIdfNorm =
+    Math.sqrt([...qSet].reduce((acc, t) => acc + (idf.get(t) ?? 0) ** 2, 0)) || 1;
+
+  const scored: Retrieval[] = chunks.map((chunk, i) => {
+    const tf = termFrequencies(docTokens[i]);
+    if (tf.total === 0) return { chunk, score: 0 };
+
+    let dot = 0;
+    let docNormSq = 0;
+    for (const [term, count] of tf.counts) {
+      const weight = (count / tf.total) * (idf.get(term) ?? 0);
+      docNormSq += weight * weight;
+      if (qSet.has(term)) {
+        // Query weight = IDF only (no TF in the query — short by definition).
+        dot += weight * (idf.get(term) ?? 0);
+      }
+    }
+    const docNorm = Math.sqrt(docNormSq) || 1;
+    const cos = dot / (docNorm * qIdfNorm);
+    return { chunk, score: cos };
+  });
+
+  return scored
     .filter((r) => r.score > 0)
-    .sort((a, b) => b.score - a.score);
-
-  return scored.slice(0, topK);
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
 }
 
 /* --------------------------------------------------------------- */
