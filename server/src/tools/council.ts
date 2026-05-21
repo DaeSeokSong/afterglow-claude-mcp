@@ -2,8 +2,6 @@ import { z } from 'zod';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import {
-  agentExists,
-  AgentNotFoundError,
   appendHistory,
   assertActive,
   assertInitialized,
@@ -84,10 +82,7 @@ export async function runCouncil(args: CouncilArgs): Promise<ToolReply> {
       return errorReply('중복된 slug 가 있습니다. 같은 사람을 두 번 부를 수 없어요.');
     }
     for (const slug of uniqueSlugs) {
-      if (!(await agentExists(slug))) {
-        return errorReply(new AgentNotFoundError(slug).message);
-      }
-      // active gate — draft 에이전트는 회의 참가 거부
+      // Registry-aware gate covers not-found · archived · not-signed (draft) all in order.
       try {
         await assertActive(slug);
       } catch (e) {
@@ -161,12 +156,24 @@ export async function runCouncil(args: CouncilArgs): Promise<ToolReply> {
     out.push('## 사용자 질문');
     out.push(args.question.trim());
     out.push('');
-    out.push('## 참가 규칙');
-    out.push('1. 각 에이전트는 자기 페르소나 시스템 프롬프트로 답하세요.');
-    out.push('2. 한 에이전트가 모를 때는 다른 에이전트에게 ping(`@<slug>`) 하세요.');
-    out.push('3. 합의 또는 명확한 이견까지 turn 을 진행하세요 (보통 2–3 turn).');
-    out.push('4. 마지막에 "## 결론 (합의)" / "## 이견 / 보류" 섹션을 정리해 회의록에 추가하세요.');
-    out.push('5. 모든 답변은 ✦ + 신뢰도 + 출처([1], [2]) 표시 규칙을 따르세요.');
+    out.push('## 참가 규칙 (moderator)');
+    out.push('1. **페르소나 유지** — 각 에이전트는 자기 시스템 프롬프트의 톤과 자료 안에서만 답하세요.');
+    out.push('2. **ping** — 한 에이전트가 모를 때는 `@<slug>` 로 다른 참가자에게 명시적으로 넘기세요.');
+    out.push('3. **합의 감지 신호** — 다음 중 하나가 나오면 turn 을 끝내세요:');
+    out.push('   - 마지막 두 발언이 같은 결론을 다른 표현으로 반복한다');
+    out.push('   - 모든 참가자가 명시적으로 "동의" / "OK" / "✓" / "agree" 를 표시한다');
+    out.push('   - 6 turn 을 넘긴다 (강제 종료: 결론 + 이견 둘 다 기록)');
+    out.push('4. **회의록** — 발언 후 아래 두 섹션을 transcript 끝에 추가하세요. 이 두 섹션이');
+    out.push('   `afterglow_council_summary` 의 입력이 됩니다:');
+    out.push('   ```');
+    out.push('   ## 결론 (합의)');
+    out.push('   - <합의된 결정 한 줄씩>');
+    out.push('');
+    out.push('   ## 이견 / 보류');
+    out.push('   - <합의되지 않은 항목, 또는 "- 없음 — 만장일치">');
+    out.push('   ```');
+    out.push('5. **응답 형식** — 모든 답변은 ✦ + 신뢰도 + 출처([1], [2]) 표시 규칙을 따르세요.');
+    out.push('6. **이견은 끝까지 보존** — 다수결로 묻어버리지 말고 "## 이견 / 보류" 에 그대로 적으세요.');
     out.push('');
 
     for (const p of participants) {

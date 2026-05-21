@@ -7,18 +7,20 @@
  *
  *   claude mcp add afterglow npx @daeseoksong/afterglow-mcp
  *
- * The server exposes 11 tools that mirror the slash commands in the design:
- *   - afterglow_init         (/afterglow init)
- *   - afterglow_create       (/afterglow create <slug> …)
- *   - afterglow_list         (/afterglow list)
- *   - afterglow_inspect      (/afterglow inspect <slug>)
- *   - afterglow_ask          (/afterglow ask <slug> "...")
- *   - afterglow_edit         (/afterglow edit <slug> …)
- *   - afterglow_sign         (/afterglow sign <slug> --signer "...")
- *   - afterglow_council      (/afterglow council <slugs...> "...")
- *   - afterglow_history      (/afterglow history <slug>)
- *   - afterglow_audit        (/afterglow audit)
- *   - afterglow_recalibrate  (/afterglow recalibrate <slug>)
+ * The server exposes 13 tools that mirror the slash commands in the design:
+ *   - afterglow_init             (/afterglow init)
+ *   - afterglow_create           (/afterglow create <slug> …)
+ *   - afterglow_list             (/afterglow list)
+ *   - afterglow_inspect          (/afterglow inspect <slug>)
+ *   - afterglow_ask              (/afterglow ask <slug> "...")
+ *   - afterglow_edit             (/afterglow edit <slug> …)
+ *   - afterglow_sign             (/afterglow sign <slug> --signer "...")
+ *   - afterglow_council          (/afterglow council <slugs...> "...")
+ *   - afterglow_council_summary  (/afterglow council summary [file])
+ *   - afterglow_history          (/afterglow history <slug>)
+ *   - afterglow_audit            (/afterglow audit)
+ *   - afterglow_recalibrate      (/afterglow recalibrate <slug> [--byTopic])
+ *   - afterglow_archive          (/afterglow archive <slug> --action archive|restore|list)
  *
  * `ask` and `council` do NOT call an LLM. They return persona + RAG context
  * so Claude in the user's session can compose the actual answer.
@@ -37,9 +39,11 @@ import { councilShape, runCouncil } from './tools/council.js';
 import { historyShape, runHistory } from './tools/history.js';
 import { auditShape, runAudit } from './tools/audit.js';
 import { recalibrateShape, runRecalibrate } from './tools/recalibrate.js';
+import { archiveShape, runArchive } from './tools/archive.js';
+import { councilSummaryShape, runCouncilSummary } from './tools/council_summary.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.1.2';
+const SERVER_VERSION = '0.1.3';
 
 export function buildServer(): McpServer {
   const server = new McpServer(
@@ -50,7 +54,7 @@ export function buildServer(): McpServer {
     {
       instructions:
         '퇴사자 에이전트 폴더(~/.claude/afterglow/)를 관리하는 MCP 서버. ' +
-        'init → create → sign → list → inspect → ask, 그리고 edit / council / history / audit / recalibrate 까지 11 개 도구로 한 사람의 폴더 단위로 페르소나·자료·권한·감사를 다룹니다.',
+        'init → create → sign → list → inspect → ask, edit / council / council_summary / history / audit / recalibrate / archive 까지 13 개 도구로 한 사람의 폴더 단위로 페르소나·자료·권한·감사·보관을 다룹니다.',
     },
   );
 
@@ -169,10 +173,32 @@ export function buildServer(): McpServer {
     {
       title: 'Afterglow — 신뢰도 자동 보정',
       description:
-        'history.log 의 사용 패턴(피드백·거절·low-confidence·peer-ask 비율) 을 분석해 페르소나의 confidenceFloor / peerAskThreshold 를 자동 조정합니다. 기본 dry-run, --apply 로 실제 적용.',
+        'history.log 의 사용 패턴(피드백·거절·low-confidence·peer-ask 비율) 을 분석해 페르소나의 confidenceFloor / peerAskThreshold 를 자동 조정합니다. 기본 dry-run, --apply 로 실제 적용. --byTopic 으로 expertise-aware 진단 모드 (자동 적용 안 함).',
       inputSchema: recalibrateShape,
     },
     wrap(runRecalibrate),
+  );
+
+  server.registerTool(
+    'afterglow_archive',
+    {
+      title: 'Afterglow — 보관 / 복원',
+      description:
+        'agents/<slug>/ 와 archive/<slug>/ 사이로 폴더를 옮깁니다. action=archive 는 보관(이후 ask/council 거부), action=restore 는 paused 로 복원(재서명 필요), action=list 는 보관함 슬러그 출력.',
+      inputSchema: archiveShape,
+    },
+    wrap(runArchive),
+  );
+
+  server.registerTool(
+    'afterglow_council_summary',
+    {
+      title: 'Afterglow — 회의록 자동 요약 (moderator)',
+      description:
+        'councils/ 안의 transcript 를 파싱해 참가자 · 결론 · 이견 · 합의 도달 여부 · ping 흐름 · 발언량을 구조화된 요약으로 출력합니다. 파일을 안 주면 가장 최근 회의록을 자동 선택.',
+      inputSchema: councilSummaryShape,
+    },
+    wrap(runCouncilSummary),
   );
 
   return server;

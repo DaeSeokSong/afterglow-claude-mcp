@@ -2,7 +2,7 @@
 
 # `@daeseoksong/afterglow-mcp`
 
-**Keep your departed teammate in a folder — meet them again, as a persona agent, inside Claude Code.**
+**Turn your departed teammate into an agent. Make offboarding seamless.**
 
 <p>
   <a href="./README.md"><img alt="한국어" src="https://img.shields.io/badge/lang-한국어-29261b?style=flat-square&labelColor=B5482C"></a>
@@ -94,7 +94,7 @@ sequenceDiagram
 
 **`afterglow_ask` never calls an LLM.** It returns a bundle of (persona system prompt + RAG hits) so the Claude you already pay for writes the actual answer. → No extra model, GPU, or embedding API.
 
-## 🛠 The 11 tools
+## 🛠 The 13 tools
 
 <table>
   <thead>
@@ -158,7 +158,17 @@ sequenceDiagram
     <tr>
       <td><code>afterglow_recalibrate</code></td>
       <td><code>/afterglow recalibrate &lt;slug&gt;</code></td>
-      <td>Analyse <code>history.log</code> (feedback / refusals / low-confidence / peer-ask rates) and suggest new <code>confidenceFloor</code> · <code>peerAskThreshold</code>. Dry-run by default; <code>--apply</code> to persist.</td>
+      <td>Analyse <code>history.log</code> (feedback / refusals / low-confidence / peer-ask rates) and suggest new <code>confidenceFloor</code> · <code>peerAskThreshold</code>. Dry-run by default; <code>--apply</code> to persist. <code>--byTopic</code> = expertise-aware diagnostic.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_archive</code></td>
+      <td><code>/afterglow archive &lt;slug&gt; --action archive|restore|list</code></td>
+      <td>Move folders between <code>agents/&lt;slug&gt;/</code> and <code>archive/&lt;slug&gt;/</code>, flipping status <b>archived ↔ paused</b>. Archived agents are blocked from <code>ask</code> / <code>council</code>; restore lands in <code>paused</code> so the user re-signs explicitly.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_council_summary</code></td>
+      <td><code>/afterglow council summary [file]</code></td>
+      <td>Parse a transcript in <code>councils/</code> and emit a structured summary: participants · <b>conclusion</b> · <b>dissent</b> · consensus reached? · ping flow · per-speaker word count. Picks the most recent file when none is given.</td>
     </tr>
   </tbody>
 </table>
@@ -237,8 +247,8 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (41 tests)
-npm run test:stdio         # real MCP stdio handshake (all 11 tools + chain verify)
+npm test                   # vitest (62 tests)
+npm run test:stdio         # real MCP stdio handshake (all 13 tools + archive round-trip + chain verify)
 npm run test:all           # unit → build → stdio
 ```
 
@@ -261,14 +271,17 @@ server/
 │     ├─ ask.ts
 │     ├─ edit.ts
 │     ├─ council.ts
+│     ├─ council_summary.ts
 │     ├─ history.ts
 │     ├─ audit.ts
-│     ├─ recalibrate.ts
+│     ├─ recalibrate.ts ← global + by-topic (expertise-aware)
+│     ├─ archive.ts     ← archive / restore / list
 │     └─ types.ts       ← ToolReply + safe() wrapper
 ├─ test/
 │  ├─ storage.test.ts   ← vitest (12 tests)
-│  ├─ tools.test.ts     ← vitest (29 tests, all v0.1.1 tools + RAG + edge cases)
-│  └─ stdio.smoke.mjs   ← live MCP handshake against all 11 tools
+│  ├─ tools.test.ts     ← vitest (29 tests — v0.1.1 tools + RAG + edge cases)
+│  ├─ phase4.test.ts    ← vitest (21 tests — archive / council_summary / by-topic)
+│  └─ stdio.smoke.mjs   ← live MCP handshake against all 13 tools + archive round-trip
 ├─ tsconfig.json
 ├─ vitest.config.ts
 └─ package.json
@@ -290,16 +303,17 @@ The `embeddings/` folder is created by `init` precisely so the on-disk shape is 
 
 ## 🗺 Roadmap
 
-- [x] 11 tools shipped: init · create · sign · list · inspect · ask · edit · council · history · audit · recalibrate
+- [x] 13 tools shipped: init · create · sign · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive
 - [x] zod persona schema + auto-rendered system prompt
 - [x] TF-IDF RAG (offline · zero deps)
 - [x] SHA-256 hash-chained audit log + verifier
 - [x] Consent.md sign workflow (draft → active gate)
-- [x] 41 vitest tests + full stdio handshake smoke
-- [ ] Dense-vector RAG backend (drop-in inside `rag.ts`)
-- [ ] Council moderator: stronger consensus detection + auto-summary
-- [ ] `afterglow_archive` — archive + restore agents
-- [ ] Per-topic recalibration (not just thresholds)
+- [x] Recalibrate: global + **expertise-aware by-topic** diagnostic
+- [x] **`afterglow_archive`** — archive + restore agents
+- [x] **Council moderator** — stronger consensus rules + `afterglow_council_summary` auto-summarizer
+- [x] 62 vitest tests + full stdio handshake smoke (covers all 13 tools)
+- [ ] Web companion: shareable read-only "afterglow page" per agent
+- [ ] Slack integration
 
 [Issues & PRs welcome.](https://github.com/DaeSeokSong/Afterglow/issues/new)
 

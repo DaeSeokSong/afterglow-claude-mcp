@@ -5,14 +5,14 @@ import { safe, type ToolReply } from './types.js';
 
 export const listShape = {
   status: z
-    .enum(['all', 'active', 'learning', 'paused', 'draft'])
+    .enum(['all', 'active', 'learning', 'paused', 'draft', 'archived'])
     .optional()
-    .describe('필터링할 상태. 기본 all.'),
+    .describe('필터링할 상태. 기본 all (archived 포함). archived 만 보려면 --status archived.'),
   json: z.boolean().optional().describe('JSON으로 출력 (스크립트용).'),
 } as const;
 
 interface ListArgs {
-  status?: 'all' | 'active' | 'learning' | 'paused' | 'draft';
+  status?: 'all' | 'active' | 'learning' | 'paused' | 'draft' | 'archived';
   json?: boolean;
 }
 
@@ -66,6 +66,7 @@ export async function runList(args: ListArgs): Promise<ToolReply> {
       a.status === 'active' ? '●'
       : a.status === 'learning' ? '◐'
       : a.status === 'paused' ? '○'
+      : a.status === 'archived' ? '▣'
       : '□';
     const status = `${dot} ${a.status}`.padEnd(9);
     const trained = a.trainedAt ? a.trainedAt.slice(0, 10) : '—';

@@ -1,7 +1,5 @@
 import { z } from 'zod';
 import {
-  agentExists,
-  AgentNotFoundError,
   appendHistory,
   assertActive,
   assertInitialized,
@@ -42,10 +40,7 @@ interface AskArgs {
 export async function runAsk(args: AskArgs): Promise<ToolReply> {
   return safe(async () => {
   await assertInitialized();
-  if (!(await agentExists(args.slug))) {
-    return errorReply(new AgentNotFoundError(args.slug).message);
-  }
-  // consent gate — only active agents may answer
+  // Registry-aware gate: handles not-found · archived · not-signed in order.
   try {
     await assertActive(args.slug);
   } catch (e) {

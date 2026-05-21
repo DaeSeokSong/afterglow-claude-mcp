@@ -49,6 +49,14 @@ export function agentDir(slug: string): string {
   return join(agentsDir(), slug);
 }
 
+export function archiveDir(): string {
+  return join(rootDir(), 'archive');
+}
+
+export function archivedAgentDir(slug: string): string {
+  return join(archiveDir(), slug);
+}
+
 export function personaPath(slug: string): string {
   return join(agentDir(slug), 'persona.json');
 }
@@ -176,11 +184,13 @@ export async function init(opts: InitOptions = {}): Promise<InitResult> {
 /* Registry I/O                                                    */
 /* --------------------------------------------------------------- */
 
+export type AgentStatus = 'active' | 'learning' | 'paused' | 'draft' | 'archived';
+
 export interface RegistryEntry {
   slug: string;
   name: string;
   role: string;
-  status: 'active' | 'learning' | 'paused' | 'draft';
+  status: AgentStatus;
   createdAt: string;
   trainedAt: string | null;
 }
@@ -378,11 +388,139 @@ export async function getStatus(slug: string): Promise<RegistryEntry['status']> 
 /**
  * Gate for `afterglow_ask` (and council). Allows only `active` agents.
  * Bypass for tests / debug: AFTERGLOW_ALLOW_DRAFT=1 disables the gate.
+ * Archived agents are always blocked (must be restored first).
  */
 export async function assertActive(slug: string): Promise<void> {
-  if (process.env.AFTERGLOW_ALLOW_DRAFT === '1') return;
   const status = await getStatus(slug);
+  if (status === 'archived') throw new ArchivedAgentError(slug);
+  if (process.env.AFTERGLOW_ALLOW_DRAFT === '1') return;
   if (status !== 'active') throw new NotSignedError(slug);
+}
+
+/* --------------------------------------------------------------- */
+/* Archive / restore                                               */
+/* --------------------------------------------------------------- */
+
+export class ArchivedAgentError extends Error {
+  constructor(slug: string) {
+    super(`Agent "${slug}" is archived. Restore it first: /afterglow archive ${slug} --action restore`);
+    this.name = 'ArchivedAgentError';
+  }
+}
+
+export class NotArchivedError extends Error {
+  constructor(slug: string) {
+    super(`Agent "${slug}" is not archived. Nothing to restore.`);
+    this.name = 'NotArchivedError';
+  }
+}
+
+export class ArchiveTargetExistsError extends Error {
+  constructor(path: string) {
+    super(`Archive target already exists: ${path}. Refusing to overwrite.`);
+    this.name = 'ArchiveTargetExistsError';
+  }
+}
+
+export class RestoreTargetExistsError extends Error {
+  constructor(path: string) {
+    super(`Restore target already exists: ${path}. An active agent with the same slug is in the way.`);
+    this.name = 'RestoreTargetExistsError';
+  }
+}
+
+export interface ArchiveResult {
+  slug: string;
+  movedFrom: string;
+  movedTo: string;
+  previousStatus: AgentStatus;
+  archivedAt: string;
+}
+
+export async function archiveAgent(slug: string): Promise<ArchiveResult> {
+  await assertInitialized();
+  if (!(await agentExists(slug))) throw new AgentNotFoundError(slug);
+  const reg = await readRegistry();
+  const entry = reg.agents.find((a) => a.slug === slug);
+  if (!entry) throw new AgentNotFoundError(slug);
+  if (entry.status === 'archived') {
+    throw new Error(`Agent "${slug}" is already archived.`);
+  }
+
+  await ensureDir(archiveDir());
+  const target = archivedAgentDir(slug);
+  if (await pathExists(target)) throw new ArchiveTargetExistsError(target);
+
+  const source = agentDir(slug);
+  await fs.rename(source, target);
+
+  const previousStatus = entry.status;
+  const archivedAt = new Date().toISOString();
+  entry.status = 'archived';
+  await writeRegistry(reg);
+
+  return {
+    slug,
+    movedFrom: source,
+    movedTo: target,
+    previousStatus,
+    archivedAt,
+  };
+}
+
+export interface RestoreResult {
+  slug: string;
+  movedFrom: string;
+  movedTo: string;
+  newStatus: AgentStatus;
+  restoredAt: string;
+}
+
+/**
+ * Restore an archived agent back to agents/<slug>/. Lands in `paused` —
+ * the user must explicitly re-sign or call resume to reach `active`.
+ * This avoids surprise activations after months on the shelf.
+ */
+export async function restoreAgent(slug: string): Promise<RestoreResult> {
+  await assertInitialized();
+  const reg = await readRegistry();
+  const entry = reg.agents.find((a) => a.slug === slug);
+  if (!entry) throw new AgentNotFoundError(slug);
+  if (entry.status !== 'archived') throw new NotArchivedError(slug);
+
+  const source = archivedAgentDir(slug);
+  if (!(await pathExists(source))) {
+    throw new Error(`Archived folder missing: ${source}. Registry says archived but data is gone.`);
+  }
+  const target = agentDir(slug);
+  if (await pathExists(target)) throw new RestoreTargetExistsError(target);
+
+  await ensureDir(agentsDir());
+  await fs.rename(source, target);
+
+  const restoredAt = new Date().toISOString();
+  entry.status = 'paused';
+  await writeRegistry(reg);
+
+  return {
+    slug,
+    movedFrom: source,
+    movedTo: target,
+    newStatus: 'paused',
+    restoredAt,
+  };
+}
+
+export async function listArchivedSlugs(): Promise<string[]> {
+  try {
+    const entries = (await fs.readdir(archiveDir(), { withFileTypes: true })) as unknown as {
+      name: string;
+      isDirectory: () => boolean;
+    }[];
+    return entries.filter((e) => e.isDirectory()).map((e) => e.name).sort();
+  } catch {
+    return [];
+  }
 }
 
 /* --------------------------------------------------------------- */

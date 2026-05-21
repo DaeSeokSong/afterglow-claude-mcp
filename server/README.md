@@ -2,7 +2,7 @@
 
 # `@daeseoksong/afterglow-mcp`
 
-**퇴사한 동료를 폴더 하나로 — Claude Code 안에서 다시 만나는 페르소나 에이전트 MCP**
+**퇴사한 동료를 에이전트로 만들어서 퇴사 후 인수인계를 수월하게 하세요**
 
 <p>
   <img alt="한국어" src="https://img.shields.io/badge/lang-한국어-B5482C?style=flat-square&labelColor=29261b">
@@ -93,7 +93,7 @@ sequenceDiagram
 
 **핵심**: `afterglow_ask`는 LLM을 호출하지 않습니다. 페르소나와 검색 결과를 구조화된 텍스트로 묶어 반환하고, Claude Code 가 자기 컨텍스트로 직접 답변을 생성합니다. → 추가 모델 / GPU / 임베딩 API 0원.
 
-## 🛠 도구 11개
+## 🛠 도구 13개
 
 <table>
   <thead>
@@ -157,7 +157,17 @@ sequenceDiagram
     <tr>
       <td><code>afterglow_recalibrate</code></td>
       <td><code>/afterglow recalibrate &lt;slug&gt;</code></td>
-      <td><code>history.log</code> 분석 (피드백·거절·low-conf·peer-ask 비율) → <code>confidenceFloor</code> / <code>peerAskThreshold</code> 자동 조정 제안. 기본 dry-run, <code>--apply</code>로 실제 반영.</td>
+      <td><code>history.log</code> 분석 (피드백·거절·low-conf·peer-ask 비율) → <code>confidenceFloor</code> / <code>peerAskThreshold</code> 자동 조정 제안. 기본 dry-run, <code>--apply</code>로 실제 반영. <code>--byTopic</code>은 expertise 별 진단 모드.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_archive</code></td>
+      <td><code>/afterglow archive &lt;slug&gt; --action archive|restore|list</code></td>
+      <td><code>agents/&lt;slug&gt;/</code> ↔ <code>archive/&lt;slug&gt;/</code> 사이로 폴더를 옮기고 status 를 <b>archived ↔ paused</b> 로 전환. 보관된 에이전트는 <code>ask</code> / <code>council</code> 거부. 복원은 paused 로 진입해 재서명 필요.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_council_summary</code></td>
+      <td><code>/afterglow council summary [file]</code></td>
+      <td><code>councils/&lt;file&gt;.md</code> 회의록 파싱 → 참가자 · <b>결론</b> · <b>이견</b> · 합의 도달 여부 · ping 흐름 · 발언량을 구조화된 요약으로 출력. 파일 미지정 시 가장 최근 회의록 자동 선택.</td>
     </tr>
   </tbody>
 </table>
@@ -222,8 +232,8 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (41 tests — storage + 11 tools + edge cases)
-npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (11 도구 모두 happy-path)
+npm test                   # vitest (62 tests — storage + 13 tools + 엣지케이스)
+npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (13 도구 모두 happy-path + 체인 검증)
 npm run test:all           # 전체 (unit → build → stdio)
 ```
 
@@ -246,14 +256,17 @@ server/
 │     ├─ ask.ts
 │     ├─ edit.ts
 │     ├─ council.ts
+│     ├─ council_summary.ts
 │     ├─ history.ts
 │     ├─ audit.ts
-│     ├─ recalibrate.ts
+│     ├─ recalibrate.ts   ← global + by-topic (expertise-aware)
+│     ├─ archive.ts       ← archive / restore / list
 │     └─ types.ts       ← ToolReply + safe() 래퍼
 ├─ test/
 │  ├─ storage.test.ts   ← vitest (12 tests)
-│  ├─ tools.test.ts     ← vitest (29 tests — 신규 6 도구 + RAG + 엣지케이스)
-│  └─ stdio.smoke.mjs   ← 실제 MCP stdio 핸드셰이크 (11 도구 happy-path)
+│  ├─ tools.test.ts     ← vitest (29 tests — v0.1.1 도구 + RAG + 엣지케이스)
+│  ├─ phase4.test.ts    ← vitest (21 tests — archive / council_summary / by-topic)
+│  └─ stdio.smoke.mjs   ← 실제 MCP stdio 핸드셰이크 (13 도구 + archive 라운드트립)
 ├─ tsconfig.json
 ├─ vitest.config.ts
 └─ package.json
@@ -275,16 +288,17 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 
 ## 🗺 Roadmap
 
-- [x] 11 도구 전부 출시: init · create · sign · list · inspect · ask · edit · council · history · audit · recalibrate
+- [x] 13 도구 전부 출시: init · create · sign · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive
 - [x] zod 스키마 + 시스템 프롬프트 자동 렌더링
 - [x] TF-IDF RAG (오프라인 · 외부 의존성 0)
 - [x] SHA-256 hash-chained 감사 로그 + 무결성 검증
 - [x] consent.md 서명 워크플로우 (draft → active 게이트)
-- [x] vitest 41개 + 전 도구 stdio 핸드셰이크
-- [ ] Dense-vector RAG backend (`rag.ts` drop-in)
-- [ ] Council moderator: 강화된 합의 감지 + 자동 요약
-- [ ] `afterglow_archive` — 에이전트 보관 / 복원
-- [ ] 토픽별 신뢰도 보정 (단순 threshold 아닌 expertise-aware)
+- [x] 신뢰도 보정: 전역 + **expertise-aware by-topic** 진단
+- [x] **`afterglow_archive`** — 에이전트 보관 / 복원
+- [x] **Council moderator** — 강화된 합의 감지 + `afterglow_council_summary` 자동 요약
+- [x] vitest 62개 + 전 도구 stdio 핸드셰이크
+- [ ] Web companion: 공유 가능한 read-only "afterglow 페이지"
+- [ ] Slack 연동
 
 [기여 환영](https://github.com/DaeSeokSong/Afterglow/issues/new) — 이슈 / PR / 사용 사례 모두 좋아요.
 

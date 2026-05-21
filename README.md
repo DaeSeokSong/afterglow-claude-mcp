@@ -2,7 +2,7 @@
 
 # Afterglow
 
-**퇴사한 동료를 폴더 하나로 — Claude Code 안에서 다시 만나는 페르소나 에이전트 MCP**
+**퇴사한 동료를 에이전트로 만들어서 퇴사 후 인수인계를 수월하게 하세요**
 
 <p>
   <img alt="한국어" src="https://img.shields.io/badge/lang-한국어-B5482C?style=flat-square&labelColor=29261b">
@@ -258,24 +258,23 @@ npm run test:all     # 전체 (unit → build → stdio)
 
 ## 🗺 Roadmap
 
-### 현재 (v0.1.2)
+### 현재 (v0.1.3)
 - [x] 18 화면 인터랙티브 제안서 (Vite + React 19 + TS)
 - [x] Cmd+K 팔레트 + 키보드 단축키 + 화면 간 클릭 네비
-- [x] **MCP 서버 11 도구**: `init` · `create` · `sign` · `list` · `inspect` · `ask` · `edit` · `council` · `history` · `audit` · `recalibrate`
+- [x] **MCP 서버 13 도구**: `init` · `create` · `sign` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `archive`
 - [x] persona zod schema + 시스템 프롬프트 자동 렌더링
 - [x] **TF-IDF RAG** (외부 의존성 0 · 키워드 매칭 대비 정확도 ↑)
 - [x] **SHA-256 hash-chained 감사 로그** + 무결성 검증
 - [x] **consent.md 서명 워크플로우** (draft → active 게이트, ask/council 보호)
-- [x] **신뢰도 자동 보정** (history.log 분석 → 페르소나 threshold 조정)
-- [x] vitest 41개 + stdio 핸드셰이크 (11 도구 전체 검증)
+- [x] **신뢰도 자동 보정** (전역 + **expertise-aware by-topic** 진단)
+- [x] **`afterglow_archive`** — 에이전트 보관 / 복원 (archive/<slug>/ 별도 폴더, restore는 paused 상태로)
+- [x] **Council moderator** — 강화된 합의 감지 규칙 + `afterglow_council_summary` 자동 요약 도구
+- [x] vitest 62개 + stdio 핸드셰이크 (13 도구 전체 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 
 ### 다음
-- [ ] Dense-vector RAG backend (OpenAI / Voyage / bge-m3) — `rag.ts`에 drop-in
-- [ ] Council moderator: 강화된 합의 감지 + 자동 요약
-- [ ] `afterglow_archive` — 에이전트 보관 / 복원
-- [ ] 토픽별 신뢰도 보정 (단순 threshold가 아닌 expertise-aware)
 - [ ] Web companion: 공유 가능한 read-only "afterglow 페이지"
+- [ ] Slack 연동
 
 [기여 환영](https://github.com/DaeSeokSong/Afterglow/issues/new) — 이슈 / PR / 사용 사례 모두 좋아요.
 

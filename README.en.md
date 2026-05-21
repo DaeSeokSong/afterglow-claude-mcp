@@ -2,7 +2,7 @@
 
 # Afterglow
 
-**Keep your departed teammate in a folder — meet them again, as a persona agent, inside Claude Code.**
+**Turn your departed teammate into an agent. Make offboarding seamless.**
 
 <p>
   <a href="./README.md"><img alt="한국어" src="https://img.shields.io/badge/lang-한국어-29261b?style=flat-square&labelColor=B5482C"></a>
@@ -264,23 +264,23 @@ npm run test:all     # unit → build → stdio
 
 ## 🗺 Roadmap
 
-### Now (v0.1.2)
+### Now (v0.1.3)
 - [x] 18-screen interactive proposal (Vite + React 19 + TS)
 - [x] Cmd+K palette + keyboard shortcuts + cross-screen click navigation
-- [x] All 11 MCP tools (`init` · `create` · `sign` · `list` · `inspect` · `ask` · `edit` · `council` · `history` · `audit` · `recalibrate`)
+- [x] All 13 MCP tools (`init` · `create` · `sign` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `archive`)
 - [x] zod persona schema + auto-rendered system prompt
 - [x] TF-IDF RAG retrieval (no external deps)
 - [x] SHA-256 hash-chained audit log + verifier
 - [x] Consent.md sign workflow (draft → active gate on `ask` / `council`)
-- [x] 41 vitest + extended stdio handshake (covers every tool)
+- [x] Recalibrate: global + **expertise-aware by-topic** diagnostic
+- [x] **`afterglow_archive`** — archive / restore agents (archive/<slug>/ separate folder; restore lands in paused)
+- [x] **Council moderator** — stronger consensus rules + `afterglow_council_summary` auto-summarizer
+- [x] 62 vitest + extended stdio handshake (covers every tool)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 
 ### Next
-- [ ] Dense-vector RAG backend (OpenAI / Voyage / bge-m3) — drop-in inside `rag.ts`
-- [ ] Council moderator: stronger consensus detection + auto-summary
-- [ ] `afterglow_archive` — archive + restore agents
-- [ ] Recalibrate dashboard (per-topic suggestions, not just thresholds)
 - [ ] Web companion: shareable read-only "afterglow page" per agent
+- [ ] Slack integration
 
 [Issues & PRs welcome](https://github.com/DaeSeokSong/Afterglow/issues/new).
 

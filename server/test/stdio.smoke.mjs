@@ -72,9 +72,11 @@ function assertOk(label, reply) {
 }
 
 const EXPECTED_TOOLS = [
+  'afterglow_archive',
   'afterglow_ask',
   'afterglow_audit',
   'afterglow_council',
+  'afterglow_council_summary',
   'afterglow_create',
   'afterglow_edit',
   'afterglow_history',
@@ -184,6 +186,39 @@ try {
   );
   // We don't assert specific text — small sample so it usually prints "표본 부족"
 
+  // archive + restore round-trip
+  const archiveCall = assertOk(
+    'archive',
+    await callTool('afterglow_archive', { action: 'archive', slug: 'jaehoon' }),
+  );
+  if (!/보관 완료/.test(archiveCall.content[0].text)) {
+    throw new Error('archive: expected 보관 완료');
+  }
+  const archiveList = assertOk(
+    'archive-list',
+    await callTool('afterglow_archive', { action: 'list' }),
+  );
+  if (!/jaehoon/.test(archiveList.content[0].text)) {
+    throw new Error('archive list: jaehoon missing');
+  }
+  const restoreCall = assertOk(
+    'restore',
+    await callTool('afterglow_archive', { action: 'restore', slug: 'jaehoon' }),
+  );
+  if (!/복원 완료/.test(restoreCall.content[0].text)) {
+    throw new Error('restore: expected 복원 완료');
+  }
+
+  // council_summary on the latest transcript
+  const summary = assertOk(
+    'council_summary',
+    await callTool('afterglow_council_summary', { json: true }),
+  );
+  const summaryJson = JSON.parse(summary.content[0].text);
+  if (!Array.isArray(summaryJson.participants) || summaryJson.participants.length === 0) {
+    throw new Error('council_summary: participants missing');
+  }
+
   const audit = assertOk(
     'audit',
     await callTool('afterglow_audit', { json: true }),
@@ -200,6 +235,8 @@ try {
   console.log(`  audit total        : ${auditJson.total}`);
   console.log(`  audit chain        : ${auditJson.verification?.ok ? 'verified' : 'broken'}`);
   console.log(`  recalibrate output : ${recal.content[0].text.split('\n')[0]}`);
+  console.log(`  council summary    : ${summaryJson.participants.length} participants, consensus=${summaryJson.consensusReached}`);
+  console.log(`  archive round-trip : archive → list → restore  OK`);
 } catch (err) {
   console.error('smoke: FAIL');
   console.error(err instanceof Error ? err.stack : String(err));
