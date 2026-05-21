@@ -50,6 +50,10 @@ export async function runSign(args: SignArgs): Promise<ToolReply> {
       `  시각:   ${r.signedAt}`,
     ];
     if (args.note) lines.push(`  메모:   ${args.note}`);
+    if (r.previousStatus === 'active') {
+      lines.push('');
+      lines.push('(주의) 이미 active 상태였어요. 추가 서명 블록만 consent.md 에 append 됐어요.');
+    }
     lines.push('');
     lines.push(`이제 호출 가능: claude /afterglow ask ${args.slug} "..."`);
     return { content: [{ type: 'text', text: lines.join('\n') }] };

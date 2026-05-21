@@ -394,6 +394,184 @@ describe('recalibrate · byTopic (expertise-aware)', () => {
 });
 
 /* --------------------------------------------------------------- */
+/* regression — 1차 QA P0 fixes                                    */
+/* --------------------------------------------------------------- */
+
+describe('regression · avgConfidence is a true arithmetic mean (1차 P0 fix)', () => {
+  it('25% + 75% over the same expertise yields ≈50%, not last-biased', async () => {
+    await bootstrapAndSign('jiyoon');
+    const { historyLogPath } = await import('../src/storage.js');
+    // 12 asks alternating 25/75% on the same expertise — true mean must be 50.
+    const lines: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      lines.push(`2026-02-${String(i * 2 + 1).padStart(2, '0')}T00:00:00.000Z  ask: "디자인 시스템 토큰?" (3 chunks, confidence 25%)`);
+      lines.push(`2026-02-${String(i * 2 + 2).padStart(2, '0')}T00:00:00.000Z  ask: "디자인 시스템 토큰?" (3 chunks, confidence 75%)`);
+    }
+    await writeFile(historyLogPath('jiyoon'), lines.join('\n') + '\n', 'utf8');
+
+    const { runRecalibrate } = await import('../src/tools/recalibrate.js');
+    const r = await runRecalibrate({ slug: 'jiyoon', byTopic: true });
+    expect(r.isError).toBeUndefined();
+    const text = r.content[0].text;
+    // The 디자인 row should show avg ≈ 50%, well within ±5 of true mean.
+    const m = text.match(/디자인\s+\S*\s*(\d+)\s+\d+\s+\d+\s+\d+\s+(\d+)%/);
+    expect(m, `Could not parse 디자인 row from:\n${text}`).not.toBeNull();
+    if (m) {
+      const avg = Number(m[2]);
+      expect(avg).toBeGreaterThanOrEqual(45);
+      expect(avg).toBeLessThanOrEqual(55);
+    }
+  });
+});
+
+describe('regression · audit corruption blocks further append (1차 P0 fix)', () => {
+  it('tampering with the last audit line causes the next append to fail loudly', async () => {
+    await bootstrapAndSign('jiyoon');
+    const { auditPath, append, verifyChain, AuditCorruptedError } = await import('../src/audit.js');
+    // Corrupt only the LAST line — we want lastRecord() to throw.
+    const raw = await readFile(auditPath(), 'utf8');
+    const lines = raw.split('\n').filter((l) => l.length > 0);
+    lines[lines.length - 1] = '{ not valid json';
+    await writeFile(auditPath(), lines.join('\n') + '\n', 'utf8');
+
+    await expect(append({ tool: 'test_tool', summary: 'should not happen' })).rejects.toBeInstanceOf(
+      AuditCorruptedError,
+    );
+    // verifyChain should also report failure (untouched behaviour).
+    const v = await verifyChain();
+    expect(v.ok).toBe(false);
+  });
+
+  it('safe() converts AuditCorruptedError into a structured tool reply', async () => {
+    await bootstrapAndSign('jiyoon');
+    const { auditPath } = await import('../src/audit.js');
+    const raw = await readFile(auditPath(), 'utf8');
+    const lines = raw.split('\n').filter((l) => l.length > 0);
+    lines[lines.length - 1] = '{ also broken';
+    await writeFile(auditPath(), lines.join('\n') + '\n', 'utf8');
+
+    const { runList } = await import('../src/tools/list.js');
+    const r = await runList({});
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toMatch(/corruption|corrupted/i);
+  });
+});
+
+describe('regression · council_summary refuses path traversal (2차 P1 fix)', () => {
+  it('rejects file arguments with slashes / dotdot', async () => {
+    await bootstrapAndSign('jiyoon');
+    const { runCouncilSummary } = await import('../src/tools/council_summary.js');
+    for (const attempt of ['../audit', '..\\storage', 'a/b', 'a\\b']) {
+      const r = await runCouncilSummary({ file: attempt });
+      expect(r.isError, `expected ${attempt} to be rejected`).toBe(true);
+      expect(r.content[0].text).toMatch(/경로 구분자|file 인자/);
+    }
+  });
+});
+
+describe('regression · NotSignedError carries current state (2차 P1 fix)', () => {
+  it('paused agent ask error names the actual status and points at both sign + resume', async () => {
+    await bootstrapAndSign('jiyoon');
+    const { runArchive } = await import('../src/tools/archive.js');
+    const { runAsk } = await import('../src/tools/ask.js');
+    await runArchive({ action: 'archive', slug: 'jiyoon' });
+    await runArchive({ action: 'restore', slug: 'jiyoon' });
+    // status should now be paused
+    const r = await runAsk({ slug: 'jiyoon', question: 'hi' });
+    expect(r.isError).toBe(true);
+    const txt = r.content[0].text;
+    // The new message format includes "current: <status>" — make sure it really
+    // reports paused (the looser regex from 2차 was a false positive).
+    expect(txt).toMatch(/current:\s*paused/);
+    // And it must offer both remediation paths (sign for first-time, resume for re-activation).
+    expect(txt).toMatch(/\/afterglow sign/);
+    expect(txt).toMatch(/\/afterglow resume/);
+  });
+});
+
+/* --------------------------------------------------------------- */
+/* afterglow_resume tool (3차 P0 fix)                              */
+/* --------------------------------------------------------------- */
+
+describe('resume · happy + edge cases', () => {
+  it('paused agent (after archive → restore) becomes active again', async () => {
+    await bootstrapAndSign('jiyoon');
+    const { runArchive } = await import('../src/tools/archive.js');
+    const { runResume } = await import('../src/tools/resume.js');
+    const { runAsk } = await import('../src/tools/ask.js');
+    const { getStatus } = await import('../src/storage.js');
+    await runArchive({ action: 'archive', slug: 'jiyoon' });
+    await runArchive({ action: 'restore', slug: 'jiyoon' });
+    expect(await getStatus('jiyoon')).toBe('paused');
+
+    const r = await runResume({ slug: 'jiyoon' });
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toMatch(/활성화/);
+    expect(await getStatus('jiyoon')).toBe('active');
+
+    // ask now succeeds
+    const a = await runAsk({ slug: 'jiyoon', question: 'hello' });
+    expect(a.isError).toBeUndefined();
+  });
+
+  it('resume on already-active agent is a no-op with a friendly message', async () => {
+    await bootstrapAndSign('jiyoon');
+    const { runResume } = await import('../src/tools/resume.js');
+    const r = await runResume({ slug: 'jiyoon' });
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toMatch(/이미 active/);
+  });
+
+  it('resume refuses an archived agent (must restore first)', async () => {
+    await bootstrapAndSign('jiyoon');
+    const { runArchive } = await import('../src/tools/archive.js');
+    const { runResume } = await import('../src/tools/resume.js');
+    await runArchive({ action: 'archive', slug: 'jiyoon' });
+    const r = await runResume({ slug: 'jiyoon' });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toMatch(/archived|--action restore/);
+  });
+
+  it('resume errors on unknown slug', async () => {
+    const { runInit } = await import('../src/tools/init.js');
+    const { runResume } = await import('../src/tools/resume.js');
+    await runInit({});
+    const r = await runResume({ slug: 'ghost' });
+    expect(r.isError).toBe(true);
+  });
+
+  it('resume promotes a draft agent (used when sign is impossible)', async () => {
+    // draft = create without sign
+    await bootstrap('jiyoon');
+    const { runResume } = await import('../src/tools/resume.js');
+    const { getStatus } = await import('../src/storage.js');
+    expect(await getStatus('jiyoon')).toBe('draft');
+    const r = await runResume({ slug: 'jiyoon' });
+    expect(r.isError).toBeUndefined();
+    expect(await getStatus('jiyoon')).toBe('active');
+  });
+});
+
+describe('regression · inspect surfaces current status (3차 P2 fix)', () => {
+  it('inspect text output includes status label', async () => {
+    await bootstrapAndSign('jiyoon');
+    const { runInspect } = await import('../src/tools/inspect.js');
+    const r = await runInspect({ slug: 'jiyoon' });
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toMatch(/● active/);
+  });
+
+  it('inspect JSON output includes status field', async () => {
+    await bootstrapAndSign('jiyoon');
+    const { runInspect } = await import('../src/tools/inspect.js');
+    const r = await runInspect({ slug: 'jiyoon', json: true });
+    expect(r.isError).toBeUndefined();
+    const data = JSON.parse(r.content[0].text) as { status: string };
+    expect(data.status).toBe('active');
+  });
+});
+
+/* --------------------------------------------------------------- */
 /* archived agent integration                                      */
 /* --------------------------------------------------------------- */
 

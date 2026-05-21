@@ -313,8 +313,18 @@ export async function readHistory(slug: string): Promise<HistoryEvent[]> {
 /* --------------------------------------------------------------- */
 
 export class NotSignedError extends Error {
-  constructor(slug: string) {
-    super(`Agent "${slug}" is in draft state. Run /afterglow sign ${slug} --signer "..." first.`);
+  constructor(slug: string, currentStatus?: AgentStatus) {
+    const stateHint = currentStatus ? ` (current: ${currentStatus})` : '';
+    // For `paused` and `draft` we point users at two different remedies:
+    //   - draft   → /afterglow sign     (consent not yet captured)
+    //   - paused  → /afterglow resume   (consent still on file)
+    // Both options are listed so the message stays useful when the caller
+    // didn't pass currentStatus.
+    super(
+      `Agent "${slug}" is not active${stateHint}.\n` +
+        `  · 처음 서명: /afterglow sign ${slug} --signer "..."\n` +
+        `  · 이미 서명되어 있다면: /afterglow resume ${slug}`,
+    );
     this.name = 'NotSignedError';
   }
 }
@@ -394,7 +404,7 @@ export async function assertActive(slug: string): Promise<void> {
   const status = await getStatus(slug);
   if (status === 'archived') throw new ArchivedAgentError(slug);
   if (process.env.AFTERGLOW_ALLOW_DRAFT === '1') return;
-  if (status !== 'active') throw new NotSignedError(slug);
+  if (status !== 'active') throw new NotSignedError(slug, status);
 }
 
 /* --------------------------------------------------------------- */

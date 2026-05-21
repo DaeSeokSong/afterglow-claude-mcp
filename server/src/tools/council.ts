@@ -196,7 +196,7 @@ export async function runCouncil(args: CouncilArgs): Promise<ToolReply> {
     }
 
     out.push('## 회의록');
-    out.push(`작성 후 ${path} 에 append 해 주세요. 사용자가 추후 \`/afterglow log ${file.replace('.md', '')}\` 로 다시 볼 수 있어야 해요.`);
+    out.push(`작성 후 ${path} 에 append 해 주세요. 사용자가 추후 \`/afterglow council summary ${file.replace('.md', '')}\` 로 합의/이견 자동 요약을 볼 수 있어요. 파일을 직접 열어보고 싶으면 그냥 \`cat ${path}\`.`);
 
     return { content: [{ type: 'text', text: out.join('\n') }] };
   });
@@ -207,5 +207,14 @@ function truncate(s: string, n: number): string {
 }
 
 function shortPath(p: string): string {
-  return p.replace(process.env.HOME ?? '', '~').replace(/\\/g, '/');
+  // Cross-platform homedir lookup — POSIX uses HOME, Windows uses USERPROFILE.
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+  const normalised = p.replace(/\\/g, '/');
+  if (home) {
+    const normHome = home.replace(/\\/g, '/');
+    if (normalised.startsWith(normHome)) {
+      return '~' + normalised.slice(normHome.length);
+    }
+  }
+  return normalised;
 }

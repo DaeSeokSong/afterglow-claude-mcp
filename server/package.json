@@ -3,7 +3,7 @@
   "version": "0.1.3",
   "description": "Afterglow MCP server — manage 퇴사자 에이전트 폴더 + persona + RAG, surfaced as Claude Code slash commands.",
   "type": "module",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "DaeSeokSong (https://github.com/DaeSeokSong)",
   "homepage": "https://github.com/DaeSeokSong/Afterglow/tree/main/server#readme",
   "bugs": {
@@ -45,7 +45,7 @@
     "test": "vitest run",
     "test:stdio": "node test/stdio.smoke.mjs",
     "test:all": "npm run test && npm run build && npm run test:stdio",
-    "prepublishOnly": "npm run build && npm run test"
+    "prepublishOnly": "npm run build && npm run test && npm run test:stdio"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",

@@ -107,7 +107,18 @@ function truncate(s: string, n: number): string {
 }
 
 function shortPath(p: string): string {
-  return p.replace(process.env.HOME ?? '', '~').replace(/\\/g, '/');
+  // Cross-platform: HOME on POSIX, USERPROFILE on Windows. os.homedir() is
+  // the canonical lookup but importing it here would re-introduce a circular
+  // shape; reading both env vars is sufficient for this display helper.
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? '';
+  const normalised = p.replace(/\\/g, '/');
+  if (home) {
+    const normHome = home.replace(/\\/g, '/');
+    if (normalised.startsWith(normHome)) {
+      return '~' + normalised.slice(normHome.length);
+    }
+  }
+  return normalised;
 }
 
 /**

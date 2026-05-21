@@ -23,7 +23,7 @@
 <p>
   <a href="#-한-줄-설치"><b>한 줄 설치</b></a> ·
   <a href="#-동작-원리">동작 원리</a> ·
-  <a href="#-도구-5개">도구 5개</a> ·
+  <a href="#-도구-14개">도구 14개</a> ·
   <a href="#-폴더-구조">폴더 구조</a> ·
   <a href="#-development">개발</a> ·
   <a href="https://github.com/DaeSeokSong/Afterglow">GitHub →</a>
@@ -58,6 +58,7 @@ claude mcp add afterglow npx -y @daeseoksong/afterglow-mcp
 ```bash
 claude /afterglow init                                              # ~/.claude/afterglow/ 부트스트랩
 claude /afterglow create jiyoon --name 이지윤 --role "프로덕트 디자이너"
+claude /afterglow sign jiyoon --signer "이지윤"                      # consent.md 서명 → status active
 claude /afterglow list
 claude /afterglow ask jiyoon "온보딩 step 3 이탈, 어떻게 줄였어요?"
 ```
@@ -85,7 +86,7 @@ sequenceDiagram
     U->>CC: claude /afterglow ask jiyoon "..."
     CC->>MCP: tools/call afterglow_ask
     MCP->>FS: persona.json + system-prompt.md
-    MCP->>FS: knowledge/ retrieval (RAG)
+    MCP->>FS: knowledge/ retrieval (TF-IDF RAG)
     MCP-->>CC: 페르소나 + 검색된 청크
     Note over CC: Claude 가 자기 세션으로 답변 생성<br/>(별도 모델 호출 없음)
     CC-->>U: ✦ 답변 + 신뢰도 + 출처
@@ -93,7 +94,7 @@ sequenceDiagram
 
 **핵심**: `afterglow_ask`는 LLM을 호출하지 않습니다. 페르소나와 검색 결과를 구조화된 텍스트로 묶어 반환하고, Claude Code 가 자기 컨텍스트로 직접 답변을 생성합니다. → 추가 모델 / GPU / 임베딩 API 0원.
 
-## 🛠 도구 13개
+## 🛠 도구 14개
 
 <table>
   <thead>
@@ -118,6 +119,12 @@ sequenceDiagram
       <td><code>afterglow_sign</code></td>
       <td><code>/afterglow sign &lt;slug&gt; --signer "…"</code></td>
       <td><code>consent.md</code>에 서명 블록 추가 + status <b>draft → active</b> 전환. 미서명 에이전트는 <code>ask</code> / <code>council</code> 거부.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_resume</code></td>
+      <td><code>/afterglow resume &lt;slug&gt;</code></td>
+      <td>paused / draft / learning 상태의 에이전트를 다시 active 로. <code>archive → restore</code> 직후, 또는 본인이 자리를 비웠다 돌아왔는데 기존 서명이 유효한 경우 사용. archived 는 거부 — 먼저 <code>--action restore</code> 필요.
+        <br><sub>⚠ <code>resume</code> 은 consent gate 를 <b>우회</b>합니다 (consent.md 가 유효한지 사용자 판단). 새 서명이 필요한 케이스에는 <code>sign</code> 을 쓰세요.</sub></td>
     </tr>
     <tr>
       <td><code>afterglow_list</code></td>
@@ -205,15 +212,17 @@ sequenceDiagram
 ~/.claude/afterglow/
 ├─ config.yml                ← 환경 설정 (embedding model · storage root)
 ├─ registry.json             ← 전체 에이전트 인덱스
+├─ audit.log                 ← SHA-256 hash-chained 도구 호출 로그
 ├─ councils/                 ← council + peer-ask 회의록 (markdown)
+├─ archive/                  ← 보관(archived)된 에이전트 폴더 (restore 시 agents/ 로 복귀)
 └─ agents/<slug>/
    ├─ persona.json           ← zod 검증된 페르소나
    ├─ system-prompt.md       ← Claude에 주입할 페르소나 프롬프트
    ├─ mcp-allowlist.yml      ← (예약) 에이전트별 MCP 권한
-   ├─ consent.md             ← 본인 동의서
+   ├─ consent.md             ← 서명 → status draft → active
    ├─ history.log            ← 호출 / 피드백 / 수정 누적
    ├─ knowledge/             ← 원본 자료 (PDF · MD · TXT · CSV · JSONL)
-   └─ embeddings/            ← RAG 인덱스 (PoC: 키워드, 추후 벡터)
+   └─ embeddings/            ← RAG 인덱스 (PoC: TF-IDF, 추후 dense vector)
 ```
 
 이게 전부입니다. 백업·이동·삭제·인계 = 폴더 통째로 처리.
@@ -232,8 +241,8 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (62 tests — storage + 13 tools + 엣지케이스)
-npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (13 도구 모두 happy-path + 체인 검증)
+npm test                   # vitest (74 tests — storage 12 + tools 29 + phase4 33)
+npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (14 도구 모두 happy-path + 체인 검증)
 npm run test:all           # 전체 (unit → build → stdio)
 ```
 
@@ -251,6 +260,7 @@ server/
 │     ├─ init.ts
 │     ├─ create.ts
 │     ├─ sign.ts
+│     ├─ resume.ts          ← consent gate 우회 1-step 재활성화
 │     ├─ list.ts
 │     ├─ inspect.ts
 │     ├─ ask.ts
@@ -265,8 +275,8 @@ server/
 ├─ test/
 │  ├─ storage.test.ts   ← vitest (12 tests)
 │  ├─ tools.test.ts     ← vitest (29 tests — v0.1.1 도구 + RAG + 엣지케이스)
-│  ├─ phase4.test.ts    ← vitest (21 tests — archive / council_summary / by-topic)
-│  └─ stdio.smoke.mjs   ← 실제 MCP stdio 핸드셰이크 (13 도구 + archive 라운드트립)
+│  ├─ phase4.test.ts    ← vitest (33 tests — archive / council_summary / by-topic / resume + 회귀)
+│  └─ stdio.smoke.mjs   ← 실제 MCP stdio 핸드셰이크 (14 도구 + archive 라운드트립)
 ├─ tsconfig.json
 ├─ vitest.config.ts
 └─ package.json
@@ -288,7 +298,7 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 
 ## 🗺 Roadmap
 
-- [x] 13 도구 전부 출시: init · create · sign · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive
+- [x] 14 도구 전부 출시: init · create · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive
 - [x] zod 스키마 + 시스템 프롬프트 자동 렌더링
 - [x] TF-IDF RAG (오프라인 · 외부 의존성 0)
 - [x] SHA-256 hash-chained 감사 로그 + 무결성 검증
@@ -296,7 +306,7 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 - [x] 신뢰도 보정: 전역 + **expertise-aware by-topic** 진단
 - [x] **`afterglow_archive`** — 에이전트 보관 / 복원
 - [x] **Council moderator** — 강화된 합의 감지 + `afterglow_council_summary` 자동 요약
-- [x] vitest 62개 + 전 도구 stdio 핸드셰이크
+- [x] vitest 74개 + 전 도구 stdio 핸드셰이크
 - [ ] Web companion: 공유 가능한 read-only "afterglow 페이지"
 - [ ] Slack 연동
 
@@ -304,7 +314,7 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 
 ## 📜 License
 
-[MIT](./LICENSE) © [DaeSeokSong](https://github.com/DaeSeokSong)
+[Apache-2.0](./LICENSE) © [DaeSeokSong](https://github.com/DaeSeokSong)
 
 ---
 

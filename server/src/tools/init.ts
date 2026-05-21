@@ -27,8 +27,9 @@ export async function runInit(args: { embeddingModel?: string }): Promise<ToolRe
   }
   lines.push('');
   lines.push('다음에 할 수 있는 일:');
-  lines.push('  · /afterglow create <slug>   — 첫 에이전트 만들기');
-  lines.push('  · /afterglow list             — 등록된 에이전트 보기');
+  lines.push('  · /afterglow create <slug>           — 첫 에이전트 만들기');
+  lines.push('  · /afterglow sign <slug> --signer "이름"   — 동의서 서명 후 ask 가능');
+  lines.push('  · /afterglow list                     — 등록된 에이전트 보기');
 
   await auditAppend({
     tool: 'afterglow_init',

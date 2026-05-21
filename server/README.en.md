@@ -23,7 +23,7 @@
 <p>
   <a href="#-one-line-install"><b>One-line install</b></a> ·
   <a href="#-how-it-works">How it works</a> ·
-  <a href="#-the-11-tools">11 tools</a> ·
+  <a href="#-the-14-tools">14 tools</a> ·
   <a href="#-folder-layout">Folder layout</a> ·
   <a href="#-development">Dev</a> ·
   <a href="https://github.com/DaeSeokSong/Afterglow">GitHub →</a>
@@ -94,7 +94,7 @@ sequenceDiagram
 
 **`afterglow_ask` never calls an LLM.** It returns a bundle of (persona system prompt + RAG hits) so the Claude you already pay for writes the actual answer. → No extra model, GPU, or embedding API.
 
-## 🛠 The 13 tools
+## 🛠 The 14 tools
 
 <table>
   <thead>
@@ -119,6 +119,12 @@ sequenceDiagram
       <td><code>afterglow_sign</code></td>
       <td><code>/afterglow sign &lt;slug&gt; --signer "…"</code></td>
       <td>Append a signature block to <code>consent.md</code> and flip status <b>draft → active</b>. Unsigned agents are blocked from <code>ask</code> / <code>council</code>.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_resume</code></td>
+      <td><code>/afterglow resume &lt;slug&gt;</code></td>
+      <td>Re-activate a <code>paused</code> / <code>draft</code> / <code>learning</code> agent without re-signing. Use after <code>archive → restore</code>, or when the original consent is still valid and you just need the agent live again. Refuses <code>archived</code> — restore first.
+        <br><sub>⚠ <code>resume</code> <b>bypasses</b> the consent gate (you assert the existing consent is still valid). For a fresh signature, use <code>sign</code>.</sub></td>
     </tr>
     <tr>
       <td><code>afterglow_list</code></td>
@@ -221,11 +227,12 @@ Patch any subset of: `name` · `role` · `tenure` · `bio` · `addExpertise` / `
 ├─ registry.json             ← agent index
 ├─ audit.log                 ← SHA-256 hash-chained tool log
 ├─ councils/                 ← council + peer-ask transcripts
+├─ archive/                  ← archived agent folders (returned to agents/ on restore)
 └─ agents/<slug>/
    ├─ persona.json           ← zod-validated persona
    ├─ system-prompt.md       ← persona prompt injected into Claude
    ├─ mcp-allowlist.yml      ← (reserved) per-agent MCP allowlist
-   ├─ consent.md             ← signed by the person → status active
+   ├─ consent.md             ← signature flips status draft → active
    ├─ history.log            ← call / feedback / edit trail
    ├─ knowledge/             ← raw sources (PDF · MD · TXT · CSV · JSONL)
    └─ embeddings/            ← RAG index (PoC: TF-IDF terms; future: dense vectors)
@@ -247,8 +254,8 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (62 tests)
-npm run test:stdio         # real MCP stdio handshake (all 13 tools + archive round-trip + chain verify)
+npm test                   # vitest (74 tests)
+npm run test:stdio         # real MCP stdio handshake (all 14 tools + archive round-trip + chain verify)
 npm run test:all           # unit → build → stdio
 ```
 
@@ -266,6 +273,7 @@ server/
 │     ├─ init.ts
 │     ├─ create.ts
 │     ├─ sign.ts
+│     ├─ resume.ts          ← 1-step re-activation, consent gate bypass
 │     ├─ list.ts
 │     ├─ inspect.ts
 │     ├─ ask.ts
@@ -280,8 +288,8 @@ server/
 ├─ test/
 │  ├─ storage.test.ts   ← vitest (12 tests)
 │  ├─ tools.test.ts     ← vitest (29 tests — v0.1.1 tools + RAG + edge cases)
-│  ├─ phase4.test.ts    ← vitest (21 tests — archive / council_summary / by-topic)
-│  └─ stdio.smoke.mjs   ← live MCP handshake against all 13 tools + archive round-trip
+│  ├─ phase4.test.ts    ← vitest (33 tests — archive / council_summary / by-topic / resume + regressions)
+│  └─ stdio.smoke.mjs   ← live MCP handshake against all 14 tools + archive round-trip
 ├─ tsconfig.json
 ├─ vitest.config.ts
 └─ package.json
@@ -303,7 +311,7 @@ The `embeddings/` folder is created by `init` precisely so the on-disk shape is 
 
 ## 🗺 Roadmap
 
-- [x] 13 tools shipped: init · create · sign · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive
+- [x] 14 tools shipped: init · create · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive
 - [x] zod persona schema + auto-rendered system prompt
 - [x] TF-IDF RAG (offline · zero deps)
 - [x] SHA-256 hash-chained audit log + verifier
@@ -311,7 +319,7 @@ The `embeddings/` folder is created by `init` precisely so the on-disk shape is 
 - [x] Recalibrate: global + **expertise-aware by-topic** diagnostic
 - [x] **`afterglow_archive`** — archive + restore agents
 - [x] **Council moderator** — stronger consensus rules + `afterglow_council_summary` auto-summarizer
-- [x] 62 vitest tests + full stdio handshake smoke (covers all 13 tools)
+- [x] 74 vitest tests + full stdio handshake smoke (covers all 14 tools)
 - [ ] Web companion: shareable read-only "afterglow page" per agent
 - [ ] Slack integration
 
@@ -319,7 +327,7 @@ The `embeddings/` folder is created by `init` precisely so the on-disk shape is 
 
 ## 📜 License
 
-[MIT](./LICENSE) © [DaeSeokSong](https://github.com/DaeSeokSong)
+[Apache-2.0](./LICENSE) © [DaeSeokSong](https://github.com/DaeSeokSong)
 
 ---
 

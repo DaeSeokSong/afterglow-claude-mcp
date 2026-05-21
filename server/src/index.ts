@@ -7,7 +7,7 @@
  *
  *   claude mcp add afterglow npx @daeseoksong/afterglow-mcp
  *
- * The server exposes 13 tools that mirror the slash commands in the design:
+ * The server exposes 14 tools that mirror the slash commands in the design:
  *   - afterglow_init             (/afterglow init)
  *   - afterglow_create           (/afterglow create <slug> …)
  *   - afterglow_list             (/afterglow list)
@@ -15,6 +15,7 @@
  *   - afterglow_ask              (/afterglow ask <slug> "...")
  *   - afterglow_edit             (/afterglow edit <slug> …)
  *   - afterglow_sign             (/afterglow sign <slug> --signer "...")
+ *   - afterglow_resume           (/afterglow resume <slug>)
  *   - afterglow_council          (/afterglow council <slugs...> "...")
  *   - afterglow_council_summary  (/afterglow council summary [file])
  *   - afterglow_history          (/afterglow history <slug>)
@@ -41,6 +42,7 @@ import { auditShape, runAudit } from './tools/audit.js';
 import { recalibrateShape, runRecalibrate } from './tools/recalibrate.js';
 import { archiveShape, runArchive } from './tools/archive.js';
 import { councilSummaryShape, runCouncilSummary } from './tools/council_summary.js';
+import { resumeShape, runResume } from './tools/resume.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
 const SERVER_VERSION = '0.1.3';
@@ -54,7 +56,7 @@ export function buildServer(): McpServer {
     {
       instructions:
         '퇴사자 에이전트 폴더(~/.claude/afterglow/)를 관리하는 MCP 서버. ' +
-        'init → create → sign → list → inspect → ask, edit / council / council_summary / history / audit / recalibrate / archive 까지 13 개 도구로 한 사람의 폴더 단위로 페르소나·자료·권한·감사·보관을 다룹니다.',
+        'init → create → sign → list → inspect → ask, 그리고 edit / resume / council / council_summary / history / audit / recalibrate / archive 까지 14 개 도구로 한 사람의 폴더 단위로 페르소나·자료·권한·감사·보관을 다룹니다.',
     },
   );
 
@@ -78,6 +80,17 @@ export function buildServer(): McpServer {
       inputSchema: createShape,
     },
     wrap<CreateArgs>(runCreate),
+  );
+
+  server.registerTool(
+    'afterglow_resume',
+    {
+      title: 'Afterglow — 재활성화 (재서명 없이)',
+      description:
+        'paused / draft / learning 상태의 에이전트를 active 로 되돌립니다. consent.md 서명이 이미 유효한데 사용자가 자리를 비웠다 돌아왔을 때 (또는 archive → restore 후) 사용. archived 는 거부 — 먼저 /afterglow archive --action restore 가 필요.',
+      inputSchema: resumeShape,
+    },
+    wrap(runResume),
   );
 
   server.registerTool(

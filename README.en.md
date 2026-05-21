@@ -79,7 +79,7 @@ claude /afterglow ask jiyoon "Onboarding step-3 drop-off — how did you cut it?
       </td>
       <td>
         <a href="https://www.npmjs.com/package/@daeseoksong/afterglow-mcp"><code>@daeseoksong/afterglow-mcp</code></a> on npm.<br>
-        Register it and Claude Code gets 11 slash commands (<code>init / create / sign / list / inspect / ask / edit / council / history / audit / recalibrate</code>).
+        Register it and Claude Code gets 14 slash commands (<code>init · create · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive</code>).
       </td>
     </tr>
     <tr>
@@ -212,9 +212,10 @@ Afterglow/
 │  │  ├─ persona.ts        ← zod schema + system-prompt rendering
 │  │  ├─ rag.ts            ← TF-IDF retrieval (drop-in swap point)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
-│  │  └─ tools/            ← init · create · sign · list · inspect · ask
-│  │                         edit · council · history · audit · recalibrate
-│  └─ test/                ← vitest + stdio handshake
+│  │  └─ tools/            ← 14 tools: init · create · sign · resume · list · inspect
+│  │                         ask · edit · council · council_summary · history
+│  │                         audit · recalibrate · archive
+│  └─ test/                ← 74 vitest + stdio handshake (covers all 14 tools)
 │
 └─ docs/
    └─ design-source/       ← original claude.ai/design hand-off (JSX) — reference
@@ -229,16 +230,17 @@ Afterglow/
 ~/.claude/afterglow/
 ├─ config.yml                ← env config (embedding model · storage root)
 ├─ registry.json             ← index of all agents
-├─ audit.log                 ← hash-chained tool-call log
+├─ audit.log                 ← SHA-256 hash-chained tool-call log
 ├─ councils/                 ← council + peer-ask transcripts
+├─ archive/                  ← archived agent folders (returned via restore)
 └─ agents/<slug>/
    ├─ persona.json
    ├─ system-prompt.md
-   ├─ mcp-allowlist.yml
+   ├─ mcp-allowlist.yml      ← (reserved) per-agent MCP allowlist
    ├─ consent.md             ← signature block flips status draft → active
    ├─ history.log
    ├─ knowledge/             ← raw sources (PDF · MD · TXT · CSV · JSONL)
-   └─ embeddings/            ← RAG index
+   └─ embeddings/            ← RAG index (PoC: TF-IDF; later: dense vectors)
 ```
 
 </details>
@@ -257,8 +259,8 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 41 vitest tests
-npm run test:stdio   # real MCP stdio handshake (all 11 tools)
+npm test             # 74 vitest tests
+npm run test:stdio   # real MCP stdio handshake (all 14 tools)
 npm run test:all     # unit → build → stdio
 ```
 
@@ -267,7 +269,7 @@ npm run test:all     # unit → build → stdio
 ### Now (v0.1.3)
 - [x] 18-screen interactive proposal (Vite + React 19 + TS)
 - [x] Cmd+K palette + keyboard shortcuts + cross-screen click navigation
-- [x] All 13 MCP tools (`init` · `create` · `sign` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `archive`)
+- [x] All 14 MCP tools (`init` · `create` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `archive`)
 - [x] zod persona schema + auto-rendered system prompt
 - [x] TF-IDF RAG retrieval (no external deps)
 - [x] SHA-256 hash-chained audit log + verifier
@@ -275,7 +277,7 @@ npm run test:all     # unit → build → stdio
 - [x] Recalibrate: global + **expertise-aware by-topic** diagnostic
 - [x] **`afterglow_archive`** — archive / restore agents (archive/<slug>/ separate folder; restore lands in paused)
 - [x] **Council moderator** — stronger consensus rules + `afterglow_council_summary` auto-summarizer
-- [x] 62 vitest + extended stdio handshake (covers every tool)
+- [x] 74 vitest + extended stdio handshake (covers every tool)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 
 ### Next
@@ -306,7 +308,7 @@ PR checklist:
 
 ## 📜 License
 
-[MIT](./LICENSE) © [DaeSeokSong](https://github.com/DaeSeokSong)
+[Apache-2.0](./LICENSE) © [DaeSeokSong](https://github.com/DaeSeokSong)
 
 ---
 

@@ -13,7 +13,7 @@ export function ScreenInit() {
       </div>
 
       <Terminal title="claude-code  ·  설치">
-        <T.Prompt>claude mcp add afterglow npx @connecteve/afterglow-mcp@latest</T.Prompt>
+        <T.Prompt>claude mcp add afterglow npx -y @daeseoksong/afterglow-mcp</T.Prompt>
         <T.Dim>  Downloading server bundle (3.2 MB) …</T.Dim>
         <T.Ok>afterglow-mcp@0.5.0 등록됨</T.Ok>
         <T.Ok>MCP config 업데이트: ~/.config/claude-code/mcp.json</T.Ok>

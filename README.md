@@ -46,6 +46,7 @@
 claude mcp add afterglow npx -y @daeseoksong/afterglow-mcp
 claude /afterglow init
 claude /afterglow create jiyoon --name 이지윤 --role "프로덕트 디자이너"
+claude /afterglow sign jiyoon --signer "이지윤"
 claude /afterglow ask jiyoon "온보딩 step 3 이탈, 어떻게 줄였어요?"
 ```
 
@@ -78,7 +79,7 @@ claude /afterglow ask jiyoon "온보딩 step 3 이탈, 어떻게 줄였어요?"
       </td>
       <td>
         <a href="https://www.npmjs.com/package/@daeseoksong/afterglow-mcp"><code>@daeseoksong/afterglow-mcp</code></a> npm 패키지.<br>
-        Claude Code에 등록하면 <code>/afterglow init / create / list / inspect / ask</code> 5 개 슬래시 명령이 동작.
+        Claude Code에 등록하면 <code>init · create · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive</code> 14 개 슬래시 명령이 동작.
       </td>
     </tr>
     <tr>
@@ -100,11 +101,12 @@ claude /afterglow ask jiyoon "온보딩 step 3 이탈, 어떻게 줄였어요?"
 claude mcp add afterglow npx -y @daeseoksong/afterglow-mcp
 ```
 
-이어서 첫 사용 (4 줄):
+이어서 첫 사용 (5 줄):
 
 ```bash
 claude /afterglow init                                                # ~/.claude/afterglow/ 부트스트랩
 claude /afterglow create jiyoon --name 이지윤 --role "프로덕트 디자이너"
+claude /afterglow sign jiyoon --signer "이지윤"                        # consent.md 서명 → status active (ask 가능)
 claude /afterglow list
 claude /afterglow ask jiyoon "..."
 ```
@@ -162,7 +164,7 @@ sequenceDiagram
     U->>CC: claude /afterglow ask jiyoon "..."
     CC->>MCP: tools/call afterglow_ask
     MCP->>FS: persona.json + system-prompt.md
-    MCP->>FS: knowledge/ retrieval (RAG)
+    MCP->>FS: knowledge/ retrieval (TF-IDF RAG)
     MCP-->>CC: 페르소나 + 검색된 청크
     Note over CC: Claude 가 자기 세션으로 답변 생성<br/>(별도 모델 호출 없음)
     CC-->>U: ✦ 답변 + 신뢰도 + 출처
@@ -205,11 +207,12 @@ Afterglow/
 ├─ server/                 ← 실제 MCP 서버 (@daeseoksong/afterglow-mcp)
 │  ├─ src/
 │  │  ├─ index.ts          ← stdio 진입점 (McpServer + StdioServerTransport)
-│  │  ├─ storage.ts        ← ~/.claude/afterglow/ 파일시스템 어댑터
+│  │  ├─ storage.ts        ← ~/.claude/afterglow/ 파일시스템 어댑터 + consent gate
 │  │  ├─ persona.ts        ← zod schema + 시스템 프롬프트 렌더링
-│  │  ├─ rag.ts            ← 키워드 기반 RAG (drop-in 교체 지점)
-│  │  └─ tools/            ← init · create · list · inspect · ask
-│  └─ test/                ← vitest + stdio 핸드셰이크
+│  │  ├─ rag.ts            ← TF-IDF chunk retrieval (drop-in 교체 지점)
+│  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
+│  │  └─ tools/            ← 14 도구: init · create · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · archive
+│  └─ test/                ← vitest 74 + stdio 핸드셰이크 (14 도구)
 │
 └─ docs/
    └─ design-source/       ← claude.ai/design 핸드오프 원본 (JSX) — 참조용
@@ -224,15 +227,17 @@ Afterglow/
 ~/.claude/afterglow/
 ├─ config.yml                ← 환경 설정 (embedding model · storage root)
 ├─ registry.json             ← 전체 에이전트 인덱스
+├─ audit.log                 ← SHA-256 hash-chained 도구 호출 로그
 ├─ councils/                 ← council + peer-ask 회의록
+├─ archive/                  ← 보관(archive)된 에이전트 폴더 (restore 시 복귀)
 └─ agents/<slug>/
    ├─ persona.json
    ├─ system-prompt.md
-   ├─ mcp-allowlist.yml
-   ├─ consent.md
+   ├─ mcp-allowlist.yml      ← (예약) 에이전트별 MCP 권한
+   ├─ consent.md             ← 서명 → status draft → active 전환
    ├─ history.log
    ├─ knowledge/             ← 원본 자료 (PDF · MD · TXT · CSV · JSONL)
-   └─ embeddings/            ← RAG 인덱스
+   └─ embeddings/            ← RAG 인덱스 (PoC: TF-IDF, 추후 dense vector)
 ```
 
 </details>
@@ -251,8 +256,8 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 12 vitest tests
-npm run test:stdio   # 실제 MCP stdio 핸드셰이크
+npm test             # 74 vitest tests
+npm run test:stdio   # 실제 MCP stdio 핸드셰이크 (14 도구 전체)
 npm run test:all     # 전체 (unit → build → stdio)
 ```
 
@@ -261,7 +266,7 @@ npm run test:all     # 전체 (unit → build → stdio)
 ### 현재 (v0.1.3)
 - [x] 18 화면 인터랙티브 제안서 (Vite + React 19 + TS)
 - [x] Cmd+K 팔레트 + 키보드 단축키 + 화면 간 클릭 네비
-- [x] **MCP 서버 13 도구**: `init` · `create` · `sign` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `archive`
+- [x] **MCP 서버 14 도구**: `init` · `create` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `archive`
 - [x] persona zod schema + 시스템 프롬프트 자동 렌더링
 - [x] **TF-IDF RAG** (외부 의존성 0 · 키워드 매칭 대비 정확도 ↑)
 - [x] **SHA-256 hash-chained 감사 로그** + 무결성 검증
@@ -269,7 +274,7 @@ npm run test:all     # 전체 (unit → build → stdio)
 - [x] **신뢰도 자동 보정** (전역 + **expertise-aware by-topic** 진단)
 - [x] **`afterglow_archive`** — 에이전트 보관 / 복원 (archive/<slug>/ 별도 폴더, restore는 paused 상태로)
 - [x] **Council moderator** — 강화된 합의 감지 규칙 + `afterglow_council_summary` 자동 요약 도구
-- [x] vitest 62개 + stdio 핸드셰이크 (13 도구 전체 검증)
+- [x] vitest 74개 + stdio 핸드셰이크 (14 도구 전체 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 
 ### 다음
@@ -300,7 +305,7 @@ PR 전 체크:
 
 ## 📜 License
 
-[MIT](./LICENSE) © [DaeSeokSong](https://github.com/DaeSeokSong)
+[Apache-2.0](./LICENSE) © [DaeSeokSong](https://github.com/DaeSeokSong)
 
 ---
 

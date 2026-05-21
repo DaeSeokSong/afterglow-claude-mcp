@@ -113,8 +113,9 @@ export async function runArchive(args: ArchiveArgs): Promise<ToolReply> {
       `  시각: ${r.restoredAt}`,
       '',
       'paused 상태로 복원됐어요. ask 호출 전에 다음 중 하나가 필요합니다:',
-      `  · /afterglow sign ${args.slug} --signer "…"   (재서명)`,
-      '  · AFTERGLOW_ALLOW_DRAFT=1 (테스트 / 디버그)',
+      `  · /afterglow resume ${args.slug}                — 기존 consent.md 가 그대로 유효한 경우 (1-step 활성화)`,
+      `  · /afterglow sign ${args.slug} --signer "…"     — 새로 서명을 받을 수 있는 경우`,
+      '  · AFTERGLOW_ALLOW_DRAFT=1                       (테스트 / 디버그)',
     ];
     return { content: [{ type: 'text', text: lines.join('\n') }] };
   });

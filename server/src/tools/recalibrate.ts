@@ -176,7 +176,9 @@ interface TopicBucket {
   refusals: number;
   thumbsUp: number;
   thumbsDown: number;
-  avgConfidence: number | null; // average of "confidence N%" parses, if present
+  avgConfidence: number | null; // true arithmetic mean of confidence%
+  confidenceSum: number;        // internal — sum of confidence values
+  confidenceCount: number;      // internal — number of confidence samples
 }
 
 function extractQuestion(message: string): string | null {
@@ -208,6 +210,8 @@ function bucketByExpertise(messages: string[], expertise: string[]): Map<string,
         thumbsUp: 0,
         thumbsDown: 0,
         avgConfidence: null,
+        confidenceSum: 0,
+        confidenceCount: 0,
       };
       buckets.set(key, b);
     }
@@ -236,10 +240,14 @@ function bucketByExpertise(messages: string[], expertise: string[]): Map<string,
       if (isUp) b.thumbsUp++;
       if (isDown) b.thumbsDown++;
       if (conf !== null) {
-        b.avgConfidence =
-          b.avgConfidence === null ? conf : Math.round((b.avgConfidence + conf) / 2);
+        b.confidenceSum += conf;
+        b.confidenceCount++;
       }
     }
+  }
+  // Finalise true arithmetic mean per bucket.
+  for (const b of buckets.values()) {
+    b.avgConfidence = b.confidenceCount > 0 ? Math.round(b.confidenceSum / b.confidenceCount) : null;
   }
   return buckets;
 }

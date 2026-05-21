@@ -62,16 +62,28 @@ async function safeReadLines(path: string): Promise<string[]> {
   }
 }
 
+export class AuditCorruptedError extends Error {
+  constructor(seq: number | 'unknown', detail: string) {
+    super(`audit.log corruption detected at line ~${seq}: ${detail}. Refusing to append.`);
+    this.name = 'AuditCorruptedError';
+  }
+}
+
+/**
+ * Return the most-recent record. Throws `AuditCorruptedError` when the tail
+ * of the log is malformed — silently skipping a damaged last line would let
+ * the next append reuse the previous `seq` / `prev` and quietly break the
+ * tamper-evidence chain. Mid-chain corruption is still surfaced by
+ * `verifyChain` and does not block appends.
+ */
 async function lastRecord(): Promise<AuditRecord | null> {
   const lines = await safeReadLines(auditPath());
-  for (let i = lines.length - 1; i >= 0; i--) {
-    try {
-      return JSON.parse(lines[i]) as AuditRecord;
-    } catch {
-      continue;
-    }
+  if (lines.length === 0) return null;
+  try {
+    return JSON.parse(lines[lines.length - 1]) as AuditRecord;
+  } catch (err) {
+    throw new AuditCorruptedError(lines.length, err instanceof Error ? err.message : String(err));
   }
-  return null;
 }
 
 export interface AppendInput {

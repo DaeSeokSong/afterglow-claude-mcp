@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { promises as fs } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { assertInitialized, councilsDir } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
@@ -217,7 +217,18 @@ export async function runCouncilSummary(args: CouncilSummaryArgs): Promise<ToolR
     await assertInitialized();
 
     let filename = args.file?.trim();
-    if (filename && !filename.endsWith('.md')) filename = `${filename}.md`;
+    if (filename) {
+      // Reject path-traversal attempts up front. basename also drops any
+      // leading directory components so a malicious "../../audit" can only
+      // resolve to "audit.md" inside councils/.
+      if (filename.includes('/') || filename.includes('\\') || filename.includes('..')) {
+        return errorReply(
+          `file 인자에 경로 구분자가 포함될 수 없어요: "${filename}". councils/ 안의 파일명만 주세요.`,
+        );
+      }
+      filename = basename(filename);
+      if (!filename.endsWith('.md')) filename = `${filename}.md`;
+    }
 
     if (!filename) {
       const all = await listTranscripts();

@@ -84,6 +84,7 @@ const EXPECTED_TOOLS = [
   'afterglow_inspect',
   'afterglow_list',
   'afterglow_recalibrate',
+  'afterglow_resume',
   'afterglow_sign',
 ];
 
@@ -208,6 +209,11 @@ try {
   if (!/복원 완료/.test(restoreCall.content[0].text)) {
     throw new Error('restore: expected 복원 완료');
   }
+  // After restore the agent is paused; resume puts it back to active without re-signing.
+  const resumeCall = assertOk('resume', await callTool('afterglow_resume', { slug: 'jaehoon' }));
+  if (!/활성화/.test(resumeCall.content[0].text)) {
+    throw new Error('resume: expected 활성화 in reply');
+  }
 
   // council_summary on the latest transcript
   const summary = assertOk(
@@ -236,7 +242,7 @@ try {
   console.log(`  audit chain        : ${auditJson.verification?.ok ? 'verified' : 'broken'}`);
   console.log(`  recalibrate output : ${recal.content[0].text.split('\n')[0]}`);
   console.log(`  council summary    : ${summaryJson.participants.length} participants, consensus=${summaryJson.consensusReached}`);
-  console.log(`  archive round-trip : archive → list → restore  OK`);
+  console.log(`  archive round-trip : archive → list → restore → resume  OK`);
 } catch (err) {
   console.error('smoke: FAIL');
   console.error(err instanceof Error ? err.stack : String(err));

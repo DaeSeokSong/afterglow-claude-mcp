@@ -35,6 +35,15 @@ export async function runInspect(args: InspectArgs): Promise<ToolReply> {
     meta: { json: !!args.json },
   });
   const persona = await readPersona(args.slug);
+  // Pull the live status from registry so the user can see active/paused/draft/archived
+  // without a second `list` call.
+  const { getStatus } = await import('../storage.js');
+  let status = 'unknown';
+  try {
+    status = await getStatus(args.slug);
+  } catch {
+    /* very unlikely — readPersona already proved the agent exists */
+  }
 
   // Count knowledge files (1-level shallow + recursive)
   let knowledgeCount = 0;
@@ -51,7 +60,12 @@ export async function runInspect(args: InspectArgs): Promise<ToolReply> {
         {
           type: 'text',
           text: JSON.stringify(
-            { persona, knowledgeFileCount: knowledgeCount, folder: agentDir(args.slug) },
+            {
+              persona,
+              status,
+              knowledgeFileCount: knowledgeCount,
+              folder: agentDir(args.slug),
+            },
             null,
             2,
           ),
@@ -66,11 +80,18 @@ export async function runInspect(args: InspectArgs): Promise<ToolReply> {
     return '█'.repeat(filled) + '░'.repeat(20 - filled);
   };
 
+  const statusDot =
+    status === 'active' ? '● active'
+    : status === 'paused' ? '○ paused'
+    : status === 'archived' ? '▣ archived'
+    : status === 'learning' ? '◐ learning'
+    : '□ draft';
   const lines: string[] = [];
-  lines.push(`╭─ ${persona.slug}  ──  ${persona.name} (✦) ${'─'.repeat(28)}╮`);
+  lines.push(`╭─ ${persona.slug}  ──  ${persona.name} (✦)  ${statusDot} ${'─'.repeat(Math.max(2, 18))}╮`);
   lines.push(`   ${persona.role}`);
   if (persona.tenure) lines.push(`   재직 기간   ${persona.tenure}`);
   if (persona.bio) lines.push(`   소개        ${persona.bio}`);
+  lines.push(`   상태        ${statusDot}`);
   lines.push('');
   lines.push(`   ├─ 톤 ${'─'.repeat(56)}┤`);
   lines.push(`   존댓말  ${bar(tone.honorific)}  ${tone.honorific}%`);
