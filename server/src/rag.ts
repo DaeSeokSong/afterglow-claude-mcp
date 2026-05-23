@@ -15,9 +15,12 @@
  */
 import { promises as fs } from 'node:fs';
 import { join, extname } from 'node:path';
-import { knowledgeDir, agentExists, AgentNotFoundError } from './storage.js';
+import { knowledgeDir, interviewsDir, agentExists, AgentNotFoundError } from './storage.js';
 
 const ALLOWED_EXT = new Set(['.md', '.txt', '.json', '.jsonl', '.csv']);
+// Interview transcripts are searchable, but the structural session.json /
+// index.json files are NOT — indexing raw JSON state would pollute retrieval.
+const TRANSCRIPT_EXT = new Set(['.md', '.txt']);
 const CHUNK_SIZE = 800;
 const CHUNK_OVERLAP = 80;
 const STOPWORDS = new Set([
@@ -65,24 +68,38 @@ export function chunkText(text: string, size = CHUNK_SIZE, overlap = CHUNK_OVERL
 
 export async function loadChunks(slug: string): Promise<Chunk[]> {
   if (!(await agentExists(slug))) throw new AgentNotFoundError(slug);
-  const dir = knowledgeDir(slug);
-  const files = await walk(dir);
   const all: Chunk[] = [];
-  for (const path of files) {
-    const ext = extname(path).toLowerCase();
-    if (!ALLOWED_EXT.has(ext)) continue;
-    let text: string;
-    try {
-      text = await fs.readFile(path, 'utf8');
-    } catch {
-      continue;
-    }
-    const chunks = chunkText(text);
-    chunks.forEach((c, idx) => {
-      all.push({ path, chunkIndex: idx, text: c });
-    });
+
+  // Root 1 — knowledge/ : all allowed text formats.
+  const knowledgeFiles = await walk(knowledgeDir(slug));
+  for (const path of knowledgeFiles) {
+    if (!ALLOWED_EXT.has(extname(path).toLowerCase())) continue;
+    await ingest(path, all);
   }
+
+  // Root 2 — interviews/ : transcripts only (.md / .txt), so the persona can
+  // be asked about what was said in an interview recording — but session.json
+  // and index.json (also under interviews/) are skipped.
+  const interviewFiles = await walk(interviewsDir(slug));
+  for (const path of interviewFiles) {
+    if (!TRANSCRIPT_EXT.has(extname(path).toLowerCase())) continue;
+    await ingest(path, all);
+  }
+
   return all;
+}
+
+async function ingest(path: string, all: Chunk[]): Promise<void> {
+  let text: string;
+  try {
+    text = await fs.readFile(path, 'utf8');
+  } catch {
+    return;
+  }
+  const chunks = chunkText(text);
+  chunks.forEach((c, idx) => {
+    all.push({ path, chunkIndex: idx, text: c });
+  });
 }
 
 /* --------------------------------------------------------------- */
