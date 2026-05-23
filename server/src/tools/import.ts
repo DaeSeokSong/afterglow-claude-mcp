@@ -17,6 +17,7 @@ import {
 import { append as auditAppend } from '../audit.js';
 import {
   ALWAYS_EXCLUDE,
+  computeBundleHash,
   copyAgentTreeNoSymlinks,
   isAgentFolder,
   isBundleDir,
@@ -51,6 +52,11 @@ export const importShape = {
     .boolean()
     .optional()
     .describe('같은 slug 존재 시 interviews 회차만 병합 (페르소나는 보존).'),
+  expectAnchor: z
+    .string()
+    .max(120)
+    .optional()
+    .describe('보낸 사람이 별도 채널로 전달한 번들 앵커 해시. 매니페스트 위변조 검증 — 불일치 시 import 전체 거부.'),
   dryRun: z.boolean().optional().describe('실제 import 없이 검증 결과만 보고 (verify 와 동일).'),
 } as const;
 
@@ -62,6 +68,7 @@ interface ImportArgs {
   from?: string;
   acceptBrokenChain?: boolean;
   merge?: boolean;
+  expectAnchor?: string;
   dryRun?: boolean;
 }
 
@@ -92,10 +99,19 @@ export async function runImport(args: ImportArgs): Promise<ToolReply> {
     const sources: SourceEntry[] = [];
     let bundleIncludedVersions = false;
     let isBundle = false;
+    let computedAnchor: string | undefined;
     if (await isBundleDir(inputDir)) {
       isBundle = true;
       const manifest = await readManifest(inputDir);
       bundleIncludedVersions = manifest.includedVersions;
+      // Manifest-tamper check: recompute the anchor and compare to the
+      // sender-communicated one. Abort the WHOLE import on mismatch.
+      computedAnchor = computeBundleHash(manifest);
+      if (args.expectAnchor && args.expectAnchor.trim() !== computedAnchor) {
+        return errorReply(
+          `번들 앵커 불일치 — 매니페스트 위변조 의심.\n  기대: ${sanitisePromptLine(args.expectAnchor, 120)}\n  실제: ${computedAnchor}\n전체 import 를 거부합니다.`,
+        );
+      }
       for (const a of manifest.agents) {
         sources.push({
           dir: join(inputDir, 'agents', a.slug),
@@ -125,7 +141,7 @@ export async function runImport(args: ImportArgs): Promise<ToolReply> {
       results.push(await importOne(src, exclude, args, isBundle));
     }
 
-    return { content: [{ type: 'text', text: renderReport(results, args, inputDir) }] };
+    return { content: [{ type: 'text', text: renderReport(results, args, inputDir, computedAnchor) }] };
   });
 }
 
@@ -319,10 +335,13 @@ async function appendProvenanceCustody(
   await writeProvenance(targetSlug, prov);
 }
 
-function renderReport(results: ImportResult[], args: ImportArgs, inputDir: string): string {
+function renderReport(results: ImportResult[], args: ImportArgs, inputDir: string, computedAnchor?: string): string {
   const lines: string[] = [];
   const verb = args.dryRun ? '검증(dry-run)' : 'import';
   lines.push(`# afterglow ${verb} · ${inputDir}`);
+  if (computedAnchor) {
+    lines.push(`번들 앵커: ${computedAnchor}${args.expectAnchor ? ' ✓ 일치' : ' (--expectAnchor 미지정 — 보낸 사람과 대조 권장)'}`);
+  }
   lines.push('');
   for (const r of results) {
     const v = r.validation;

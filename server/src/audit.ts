@@ -184,6 +184,96 @@ export async function verifyChain(): Promise<ChainVerification> {
   return { ok: true, total: lines.length };
 }
 
+/* --------------------------------------------------------------- */
+/* Checkpoints — incremental verification anchors for large logs    */
+/* --------------------------------------------------------------- */
+
+export interface Checkpoint {
+  seq: number;
+  hash: string;
+  ts: string;
+}
+
+export function checkpointsPath(): string {
+  return join(rootDir(), 'audit.checkpoints.json');
+}
+
+export async function readCheckpoints(): Promise<Checkpoint[]> {
+  try {
+    const raw = await fs.readFile(checkpointsPath(), 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as Checkpoint[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Record a verified checkpoint at the current chain head. Verifies the FULL
+ * chain first — a checkpoint must never anchor a corrupt prefix. Returns the
+ * new checkpoint, or throws if the chain doesn't verify.
+ */
+export async function writeCheckpoint(): Promise<Checkpoint> {
+  return withLock('audit-append', async () => {
+    const v = await verifyChain();
+    if (!v.ok) throw new Error(`Refusing to checkpoint a broken chain: ${v.reason} @ seq=${v.firstBadSeq}`);
+    const last = await lastRecord();
+    if (!last) throw new Error('Nothing to checkpoint — audit log is empty.');
+    const cp: Checkpoint = { seq: last.seq, hash: last.hash, ts: new Date().toISOString() };
+    const all = await readCheckpoints();
+    all.push(cp);
+    await ensureDir(dirname(checkpointsPath()));
+    await fs.writeFile(checkpointsPath(), JSON.stringify(all, null, 2) + '\n', 'utf8');
+    return cp;
+  });
+}
+
+export interface FastVerification extends ChainVerification {
+  /** seq the verification started from (1 if no checkpoint was used) */
+  fromSeq: number;
+  usedCheckpoint: boolean;
+}
+
+/**
+ * Verify only the records AFTER the latest checkpoint, trusting the checkpoint
+ * as an anchor. O(tail) instead of O(all) for long logs. Falls back to a full
+ * verify when no checkpoint exists. Tampering BEFORE the checkpoint is by
+ * design not re-checked here (use verifyChain() for a full audit).
+ */
+export async function verifyChainFast(): Promise<FastVerification> {
+  const cps = await readCheckpoints();
+  if (cps.length === 0) {
+    const full = await verifyChain();
+    return { ...full, fromSeq: 1, usedCheckpoint: false };
+  }
+  const cp = cps[cps.length - 1];
+  const lines = await safeReadLines(auditPath());
+  // Parse all; locate the anchor record and verify the tail from it.
+  const records: AuditRecord[] = [];
+  for (const l of lines) {
+    try {
+      records.push(JSON.parse(l) as AuditRecord);
+    } catch {
+      return { ok: false, total: lines.length, firstBadSeq: records.length + 1, reason: 'malformed JSON', fromSeq: cp.seq, usedCheckpoint: true };
+    }
+  }
+  const anchor = records.find((r) => r.seq === cp.seq);
+  if (!anchor || anchor.hash !== cp.hash) {
+    return { ok: false, total: records.length, firstBadSeq: cp.seq, reason: 'checkpoint anchor mismatch (log diverged from checkpoint)', fromSeq: cp.seq, usedCheckpoint: true };
+  }
+  let prev = cp.hash;
+  let expectedSeq = cp.seq + 1;
+  for (const rec of records.filter((r) => r.seq > cp.seq)) {
+    if (rec.seq !== expectedSeq) return { ok: false, total: records.length, firstBadSeq: rec.seq, reason: `seq mismatch (expected ${expectedSeq})`, fromSeq: cp.seq, usedCheckpoint: true };
+    if (rec.prev !== prev) return { ok: false, total: records.length, firstBadSeq: rec.seq, reason: 'prev hash mismatch', fromSeq: cp.seq, usedCheckpoint: true };
+    const body: Omit<AuditRecord, 'hash'> = { seq: rec.seq, ts: rec.ts, prev: rec.prev, tool: rec.tool, slug: rec.slug, summary: rec.summary, meta: rec.meta };
+    if (rec.hash !== sha256Hex(canonicalBody(body))) return { ok: false, total: records.length, firstBadSeq: rec.seq, reason: 'hash mismatch (record tampered)', fromSeq: cp.seq, usedCheckpoint: true };
+    prev = rec.hash;
+    expectedSeq++;
+  }
+  return { ok: true, total: records.length, fromSeq: cp.seq + 1, usedCheckpoint: true };
+}
+
 export async function readAll(): Promise<AuditRecord[]> {
   const lines = await safeReadLines(auditPath());
   const out: AuditRecord[] = [];

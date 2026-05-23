@@ -59,9 +59,11 @@ import { interviewShape, runInterview } from './tools/interview.js';
 import { exportShape, runExport } from './tools/export.js';
 import { importShape, runImport } from './tools/import.js';
 import { verifyShape, runVerify } from './tools/verify.js';
+import { statusShape, runStatus } from './tools/status.js';
+import { gcShape, runGc } from './tools/gc.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.2.0';
+const SERVER_VERSION = '0.3.0';
 
 export function buildServer(): McpServer {
   const server = new McpServer(
@@ -321,6 +323,28 @@ export function buildServer(): McpServer {
       inputSchema: verifyShape,
     },
     wrap(runVerify),
+  );
+
+  server.registerTool(
+    'afterglow_status',
+    {
+      title: 'Afterglow — 전체 대시보드',
+      description:
+        '모든 에이전트의 상태·인터뷰 회차(완료/대기)·검토대기 미디어·import 출처/신뢰도를 한 번에 보여주는 운영 대시보드. 개별 inspect 보완. --json 지원.',
+      inputSchema: statusShape,
+    },
+    wrap(runStatus),
+  );
+
+  server.registerTool(
+    'afterglow_gc',
+    {
+      title: 'Afterglow — 보존/정리 (retention)',
+      description:
+        '오래된 persona 스냅샷 정리(태그 보존), 인터뷰 미디어 원본 삭제(전사본 유지·GDPR), 보관함 영구 삭제. action=list|prune-versions|purge-media|purge-archive. 기본 dry-run, --apply 로 실제 삭제.',
+      inputSchema: gcShape,
+    },
+    wrap(runGc),
   );
 
   return server;

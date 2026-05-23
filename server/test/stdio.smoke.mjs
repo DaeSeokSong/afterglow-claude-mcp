@@ -7,9 +7,10 @@
  *   init → create → sign → list → inspect → edit → ask → council
  *   → history → recalibrate → archive → version → access → correct
  *   → handoff → interview (start→answer→gap-check→dual-sign)
- *   → export → verify → import → audit
+ *   → export → verify → import → status → gc → suggest-questions
+ *   → transcribe → audit checkpoint
  *
- * Verifies tool count (22), names, and that each call returns a content block.
+ * Verifies tool count (24), names, and that each call returns a content block.
  *
  * Run as: node test/stdio.smoke.mjs
  */
@@ -92,6 +93,7 @@ const EXPECTED_TOOLS = [
   'afterglow_create',
   'afterglow_edit',
   'afterglow_export',
+  'afterglow_gc',
   'afterglow_handoff',
   'afterglow_history',
   'afterglow_import',
@@ -102,6 +104,7 @@ const EXPECTED_TOOLS = [
   'afterglow_recalibrate',
   'afterglow_resume',
   'afterglow_sign',
+  'afterglow_status',
   'afterglow_verify',
   'afterglow_version',
 ];
@@ -412,6 +415,7 @@ try {
     await callTool('afterglow_export', { slugs: ['jiyoon'], exportedBy: 'smoke runner' }),
   );
   const bundlePath = exportCall.content[0].text.match(/위치:\s*(\S+)/)[1];
+  const bundleAnchor = exportCall.content[0].text.match(/번들 앵커 해시:\s*(\S+)/)[1];
   const verifyCall = assertOk('verify', await callTool('afterglow_verify', { input: bundlePath }));
   if (!/import 가능|주의가 필요/.test(verifyCall.content[0].text)) {
     throw new Error('verify: missing verdict line');
@@ -423,8 +427,12 @@ try {
       as: 'jiyoon-copy',
       trustSigner: '이지윤',
       importedBy: 'smoke runner',
+      expectAnchor: bundleAnchor,
     }),
   );
+  if (!/✓ 일치/.test(importCall.content[0].text)) {
+    throw new Error('import: expected anchor match (✓ 일치)');
+  }
   if (!/imported/.test(importCall.content[0].text)) {
     throw new Error('import: expected an imported agent');
   }
@@ -436,6 +444,47 @@ try {
   if (!/출처 \(provenance\)/.test(askImported.content[0].text)) {
     throw new Error('ask on imported agent: missing provenance banner');
   }
+
+  /* ---------- v0.3: status · gc · suggest-questions · transcribe · audit checkpoint ---------- */
+  const statusCall = assertOk('status', await callTool('afterglow_status', { json: true }));
+  const statusJson = JSON.parse(statusCall.content[0].text);
+  if (typeof statusJson.totals?.agents !== 'number') throw new Error('status: totals missing');
+
+  const gcList = assertOk('gc-list', await callTool('afterglow_gc', { action: 'list' }));
+  if (!/정리 가능 항목/.test(gcList.content[0].text)) throw new Error('gc list: missing header');
+  // dry-run prune (no --apply) must not delete anything
+  assertOk('gc-prune-dry', await callTool('afterglow_gc', { action: 'prune-versions', slug: 'jiyoon', keep: 1 }));
+
+  const suggest = assertOk(
+    'interview-suggest',
+    await callTool('afterglow_interview', { action: 'suggest-questions', slug: 'jiyoon' }),
+  );
+  if (!/신호 A/.test(suggest.content[0].text)) throw new Error('suggest-questions: missing signal framing');
+
+  // transcribe --text round-trip: attach (the interview #001 has none) → save transcript
+  const ivStart2 = assertOk(
+    'interview-start-2',
+    await callTool('afterglow_interview', { action: 'start', slug: 'jiyoon', title: '녹음', interviewer: '김후임', interviewee: '이지윤' }),
+  );
+  const ivSid2 = ivStart2.content[0].text.match(/#(\d{3}[^\s"]*)/)[1];
+  const mediaPath = join(tmpRoot, 'agents', 'jiyoon', 'smoke-clip.mp3');
+  await writeFile(mediaPath, Buffer.from('SMOKE-AUDIO'));
+  assertOk(
+    'interview-attach-2',
+    await callTool('afterglow_interview', { action: 'attach', slug: 'jiyoon', session: ivSid2, file: mediaPath, speakers: ['이지윤'] }),
+  );
+  const tsave = assertOk(
+    'interview-transcribe-save',
+    await callTool('afterglow_interview', { action: 'transcribe', slug: 'jiyoon', session: ivSid2, file: 'smoke-clip.mp3', text: '스모크전사토큰 내용.' }),
+  );
+  if (!/저장|polished/.test(tsave.content[0].text)) throw new Error('transcribe --text: expected save');
+
+  // audit checkpoint + fast verify
+  const cp = assertOk('audit-checkpoint', await callTool('afterglow_audit', { checkpoint: true, json: true }));
+  const cpJson = JSON.parse(cp.content[0].text);
+  if (!(cpJson.checkpoints >= 1)) throw new Error('audit checkpoint: not recorded');
+  const fast = assertOk('audit-fast', await callTool('afterglow_audit', { fast: true, json: true }));
+  if (!JSON.parse(fast.content[0].text).verification?.ok) throw new Error('audit fast verify: not ok');
 
   // council_summary on the latest transcript
   const summary = assertOk(
@@ -470,7 +519,10 @@ try {
   console.log(`  correct feedback   : feedback recorded + list shows entry`);
   console.log(`  version list       : ${(versionList.content[0].text.match(/v\d+/g) ?? []).length} snapshot(s) tracked`);
   console.log(`  interview lifecycle: start → answer → gap-check → dual-sign (#${ivSid})  OK`);
-  console.log(`  portable hot-plug  : export → verify → import (jiyoon-copy) + provenance  OK`);
+  console.log(`  portable hot-plug  : export → verify → import (jiyoon-copy) + anchor + provenance  OK`);
+  console.log(`  v0.3 dashboard     : status (${statusJson.totals.agents} agents) + gc list/dry-run  OK`);
+  console.log(`  v0.3 suggest/transc: suggest-questions + transcribe --text save  OK`);
+  console.log(`  v0.3 audit         : checkpoint (${cpJson.checkpoints}) + fast verify  OK`);
 } catch (err) {
   console.error('smoke: FAIL');
   console.error(err instanceof Error ? err.stack : String(err));
