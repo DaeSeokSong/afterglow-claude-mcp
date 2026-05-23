@@ -152,8 +152,9 @@ async function importOne(
     return { sourceDir: src.dir, targetSlug: v.slug, validation: v, action: 'rejected', reason: `persona.json 검증 실패 (${v.schemaErrors.slice(0, 2).join('; ')})` };
   }
 
-  // Target slug.
-  const targetSlug = !isBundle && args.as ? args.as : v.slug;
+  // Target slug. `--as` is honoured for any single-agent import (the multi-agent
+  // guard in runImport already rejected `as` when sources.length > 1).
+  const targetSlug = args.as ? args.as : v.slug;
   try {
     assertValidSlug(targetSlug);
   } catch (e) {

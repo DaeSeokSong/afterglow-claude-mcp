@@ -5,23 +5,33 @@
  * Spawns dist/index.js, sends an initialize / initialized / tools/list
  * sequence, then exercises one realistic call against every tool:
  *   init → create → sign → list → inspect → edit → ask → council
- *   → history → recalibrate → audit
+ *   → history → recalibrate → archive → version → access → correct
+ *   → handoff → interview (start→answer→gap-check→dual-sign)
+ *   → export → verify → import → audit
  *
- * Verifies tool count, names, and that each call returns a content block.
+ * Verifies tool count (22), names, and that each call returns a content block.
  *
  * Run as: node test/stdio.smoke.mjs
  */
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const tmpRoot = await mkdtemp(join(tmpdir(), 'afterglow-stdio-'));
 const env = { ...process.env, AFTERGLOW_ROOT: tmpRoot };
 
-const child = spawn(process.execPath, ['dist/index.js'], {
+// Run the server with cwd=tmpRoot so export/import (which confine paths to the
+// process CWD) write their bundles inside the throwaway dir, not the repo.
+// dist/index.js must therefore be referenced by absolute path.
+const serverDir = join(dirname(fileURLToPath(import.meta.url)), '..');
+const entry = join(serverDir, 'dist', 'index.js');
+
+const child = spawn(process.execPath, [entry], {
   stdio: ['pipe', 'pipe', 'inherit'],
   env,
+  cwd: tmpRoot,
 });
 
 const pending = new Map(); // id → resolver
@@ -81,14 +91,18 @@ const EXPECTED_TOOLS = [
   'afterglow_council_summary',
   'afterglow_create',
   'afterglow_edit',
+  'afterglow_export',
   'afterglow_handoff',
   'afterglow_history',
+  'afterglow_import',
   'afterglow_init',
   'afterglow_inspect',
+  'afterglow_interview',
   'afterglow_list',
   'afterglow_recalibrate',
   'afterglow_resume',
   'afterglow_sign',
+  'afterglow_verify',
   'afterglow_version',
 ];
 
@@ -328,6 +342,101 @@ try {
     await callTool('afterglow_handoff', { action: 'abort', slug: 'handofftest' }),
   );
 
+  /* ---------- interview lifecycle (start → answer → gap-check → dual sign) ---------- */
+  const ivStart = assertOk(
+    'interview-start',
+    await callTool('afterglow_interview', {
+      action: 'start',
+      slug: 'jiyoon',
+      title: '온보딩 보강',
+      interviewer: '김후임',
+      interviewee: '이지윤',
+    }),
+  );
+  const ivSid = ivStart.content[0].text.match(/#(\d{3}[^\s"]*)/)[1];
+  const ivAdd = assertOk(
+    'interview-add-question',
+    await callTool('afterglow_interview', {
+      action: 'add-question',
+      slug: 'jiyoon',
+      session: ivSid,
+      question: 'step 2 설명을 줄인 이유는?',
+    }),
+  );
+  const ivQid = ivAdd.content[0].text.match(/\[(q-[0-9a-f-]+)\]/)[1];
+  assertOk(
+    'interview-answer',
+    await callTool('afterglow_interview', {
+      action: 'answer',
+      slug: 'jiyoon',
+      session: ivSid,
+      id: ivQid,
+      answer: '인지 부하를 줄이려고 절반으로 줄였어요.',
+      source: 'self-typed',
+    }),
+  );
+  const ivGap = assertOk(
+    'interview-gap-check',
+    await callTool('afterglow_interview', { action: 'gap-check', slug: 'jiyoon', session: ivSid }),
+  );
+  if (!/internal-contradiction/.test(ivGap.content[0].text)) {
+    throw new Error('interview gap-check: missing signal framing');
+  }
+  assertOk(
+    'interview-finalize-interviewer',
+    await callTool('afterglow_interview', {
+      action: 'finalize',
+      slug: 'jiyoon',
+      session: ivSid,
+      signRole: 'interviewer',
+      signer: '김후임',
+    }),
+  );
+  const ivFin = assertOk(
+    'interview-finalize-interviewee',
+    await callTool('afterglow_interview', {
+      action: 'finalize',
+      slug: 'jiyoon',
+      session: ivSid,
+      signRole: 'interviewee',
+      signer: '이지윤',
+    }),
+  );
+  if (!/finalized/.test(ivFin.content[0].text)) {
+    throw new Error('interview finalize: expected finalized after both signatures');
+  }
+
+  /* ---------- export → verify → import (portable hot-plug) ---------- */
+  const exportCall = assertOk(
+    'export',
+    await callTool('afterglow_export', { slugs: ['jiyoon'], exportedBy: 'smoke runner' }),
+  );
+  const bundlePath = exportCall.content[0].text.match(/위치:\s*(\S+)/)[1];
+  const verifyCall = assertOk('verify', await callTool('afterglow_verify', { input: bundlePath }));
+  if (!/import 가능|주의가 필요/.test(verifyCall.content[0].text)) {
+    throw new Error('verify: missing verdict line');
+  }
+  const importCall = assertOk(
+    'import',
+    await callTool('afterglow_import', {
+      input: bundlePath,
+      as: 'jiyoon-copy',
+      trustSigner: '이지윤',
+      importedBy: 'smoke runner',
+    }),
+  );
+  if (!/imported/.test(importCall.content[0].text)) {
+    throw new Error('import: expected an imported agent');
+  }
+  // Imported agent should answer with a provenance banner.
+  const askImported = assertOk(
+    'ask-imported',
+    await callTool('afterglow_ask', { slug: 'jiyoon-copy', question: '온보딩?' }),
+  );
+  if (!/출처 \(provenance\)/.test(askImported.content[0].text)) {
+    throw new Error('ask on imported agent: missing provenance banner');
+  }
+
   // council_summary on the latest transcript
   const summary = assertOk(
     'council_summary',
@@ -360,6 +469,8 @@ try {
   console.log(`  access policy      : default deny + user:smoke allow + check OK`);
   console.log(`  correct feedback   : feedback recorded + list shows entry`);
   console.log(`  version list       : ${(versionList.content[0].text.match(/v\d+/g) ?? []).length} snapshot(s) tracked`);
+  console.log(`  interview lifecycle: start → answer → gap-check → dual-sign (#${ivSid})  OK`);
+  console.log(`  portable hot-plug  : export → verify → import (jiyoon-copy) + provenance  OK`);
 } catch (err) {
   console.error('smoke: FAIL');
   console.error(err instanceof Error ? err.stack : String(err));
