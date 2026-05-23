@@ -26,7 +26,7 @@
  *   - afterglow_archive          (/afterglow archive <slug> --action archive|restore|list)
  *   - afterglow_version          (/afterglow version <slug> --action list|diff|rollback|tag|snapshot)
  *   - afterglow_access           (/afterglow access <slug> --action list|allow|deny|set-default|check)
- *   - afterglow_interview        (/afterglow interview <slug> --action start|add-question|answer|gap-check|attach|annotate|status|list|inspect|finalize|abort|transcribe)
+ *   - afterglow_interview        (/afterglow interview <slug> --action start|add-question|answer|gap-check|attach|review|annotate|status|list|inspect|finalize|abort|transcribe)
  *   - afterglow_export           (/afterglow export --slugs … | --all)
  *   - afterglow_import           (/afterglow import <path> [--as | --merge | --dryRun])
  *   - afterglow_verify           (/afterglow verify <path>)
@@ -283,7 +283,7 @@ export function buildServer(): McpServer {
       title: 'Afterglow — 다중 인터뷰 (인계자 주도)',
       description:
         '인계자(인터뷰어)가 퇴사자(인터뷰이)를 여러 회차에 걸쳐 인터뷰합니다. handoff(본인 1회 셀프검수)와 달리 회차 무제한 — 빠진 부분을 메웁니다. ' +
-        'action=start | add-question | answer | gap-check(빠진 부분 자동 감지) | attach(음성·영상) | annotate(부재 시 주석) | status | list | inspect | finalize(이중 서명) | abort | transcribe. ' +
+        'action=start | add-question | answer | gap-check(빠진 부분 자동 감지) | attach(음성·영상) | review(검토 후 인덱싱) | annotate(부재 시 주석) | status | list | inspect | finalize(이중 서명) | abort | transcribe. ' +
         'gap-check 는 LLM 을 호출하지 않고 컨텍스트를 묶어 반환 — Claude 가 후속 질문을 생성합니다.',
       inputSchema: interviewShape,
     },

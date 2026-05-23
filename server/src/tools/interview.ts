@@ -84,6 +84,7 @@ export const interviewShape = {
       'answer',
       'gap-check',
       'attach',
+      'review',
       'annotate',
       'status',
       'list',
@@ -93,7 +94,7 @@ export const interviewShape = {
       'transcribe',
     ])
     .describe(
-      'start | add-question | answer | gap-check | attach | annotate | status | list | inspect | finalize | abort | transcribe.',
+      'start | add-question | answer | gap-check | attach | review | annotate | status | list | inspect | finalize | abort | transcribe.',
     ),
   slug: z.string().min(1).describe('대상 에이전트 slug.'),
   session: z
@@ -240,6 +241,8 @@ export async function runInterview(args: InterviewArgs): Promise<ToolReply> {
         return gapCheck(args);
       case 'attach':
         return attach(args);
+      case 'review':
+        return reviewMedia(args);
       case 'annotate':
         return annotate(args);
       case 'status':
@@ -688,7 +691,12 @@ async function attach(args: InterviewArgs): Promise<ToolReply> {
   const destName = safeBasename(args.file);
   await fs.writeFile(resolve(attachDir, destName), buf);
 
-  // Optional transcript pairing → RAG-indexable .md next to the original.
+  const reviewRequired = !!args.reviewRequired;
+
+  // Optional transcript pairing. When reviewRequired, the transcript is written
+  // with a NON-indexed extension (`.transcript.pending`) so RAG/ask will NOT
+  // surface it until a human clears it via action=review — honouring the
+  // "don't cite until reviewed" promise (e.g. video may show tokens/PII).
   let transcriptFile: string | undefined;
   let transcriptStatus: Attachment['transcriptStatus'] = 'none';
   if (args.transcript) {
@@ -700,7 +708,7 @@ async function attach(args: InterviewArgs): Promise<ToolReply> {
     } catch (e) {
       return errorReply(`전사본을 읽을 수 없습니다: ${sanitisePromptLine((e as Error).message, 300)}`);
     }
-    const tName = `${destName}.transcript.md`;
+    const tName = reviewRequired ? `${destName}.transcript.pending` : `${destName}.transcript.md`;
     // Sanitise transcript text so it can't forge headers when RAG-surfaced.
     await fs.writeFile(resolve(attachDir, tName), sanitisePromptText(tRaw, 200_000), 'utf8');
     transcriptFile = tName;
@@ -717,7 +725,7 @@ async function attach(args: InterviewArgs): Promise<ToolReply> {
     consentScope: args.consentScope ? sanitisePromptLine(args.consentScope, 1_000) : undefined,
     transcriptFile,
     transcriptStatus,
-    reviewRequired: !!args.reviewRequired,
+    reviewRequired,
     chapters: (args.chapters ?? []).slice(0, 200).map((c) => ({
       at: sanitisePromptLine(c.at, 20),
       label: sanitisePromptLine(c.label, 200),
@@ -744,7 +752,10 @@ async function attach(args: InterviewArgs): Promise<ToolReply> {
     `  발화자: ${speakers.length > 0 ? speakers.join(', ') : '(없음)'}`,
     `  전사본: ${transcriptStatus}${transcriptFile ? ` (${transcriptFile} — RAG 인덱싱됨)` : ''}`,
   ];
-  if (att.reviewRequired) lines.push('  ⚠ reviewRequired — 사람이 검토 전엔 ask 인용 금지로 표기됩니다.');
+  if (att.reviewRequired) {
+    lines.push('  ⚠ reviewRequired — 전사본을 RAG 에 인덱싱하지 않았습니다 (ask 가 인용하지 않음).');
+    lines.push(`     검토 후 승인: action=review --session ${session.sessionId} --file ${destName}`);
+  }
   if (transcriptStatus === 'none') {
     lines.push('');
     lines.push('전사본이 없습니다. 옵션:');
@@ -752,6 +763,65 @@ async function attach(args: InterviewArgs): Promise<ToolReply> {
     lines.push(`  · action=transcribe --session ${session.sessionId} — 로컬 whisper 안내 / Claude polish`);
   }
   return { content: [{ type: 'text', text: lines.join('\n') }] };
+}
+
+/* --------------------------------------------------------------- */
+/* review  (clear reviewRequired hold → index the transcript)      */
+/* --------------------------------------------------------------- */
+
+async function reviewMedia(args: InterviewArgs): Promise<ToolReply> {
+  const loaded = await loadSession(args.slug, args.session);
+  if ('error' in loaded) return errorReply(loaded.error);
+  const session = loaded;
+  if (session.status === 'aborted') return errorReply(`회차 #${session.sessionId} 는 aborted 입니다.`);
+
+  const pending = session.attachments.filter((a) => a.reviewRequired);
+  if (pending.length === 0) return errorReply(`검토 대기중인 첨부가 없습니다 (#${session.sessionId}).`);
+
+  let target: Attachment | undefined;
+  if (args.file) {
+    const want = safeBasename(args.file);
+    target = session.attachments.find((a) => a.file === want || a.file === args.file);
+  } else if (pending.length === 1) {
+    target = pending[0];
+  } else {
+    return errorReply(`검토 대기 첨부가 여러 개입니다. --file 로 지정하세요: ${pending.map((a) => a.file).join(', ')}`);
+  }
+  if (!target) return errorReply(`첨부를 찾을 수 없습니다: ${sanitisePromptLine(args.file ?? '', 200)}`);
+  if (!target.reviewRequired) return errorReply(`${sanitisePromptLine(target.file, 200)} 는 이미 검토 완료 상태입니다.`);
+
+  // Promote the held transcript (`.transcript.pending`) to an indexed `.md`.
+  if (target.transcriptFile && target.transcriptFile.endsWith('.pending')) {
+    const attachDir = interviewAttachmentsDir(args.slug, session.sessionId);
+    const toName = target.transcriptFile.replace(/\.pending$/, '.md');
+    try {
+      await fs.rename(resolve(attachDir, target.transcriptFile), resolve(attachDir, toName));
+      target.transcriptFile = toName;
+    } catch (e) {
+      return errorReply(`전사본 승격 실패: ${sanitisePromptLine((e as Error).message, 200)}`);
+    }
+  }
+  target.reviewRequired = false;
+  await writeInterviewSession(args.slug, session);
+  await appendHistory(args.slug, `interview review #${session.sessionId} ${target.file} cleared`);
+  await auditAppend({
+    tool: 'afterglow_interview',
+    slug: args.slug,
+    summary: `interview review · ${session.sessionId} · ${target.file}`,
+    meta: { sessionId: session.sessionId, file: target.file },
+  });
+  return {
+    content: [
+      {
+        type: 'text',
+        text:
+          `✓ ${sanitisePromptLine(target.file, 200)} 검토 완료 (#${session.sessionId}).` +
+          (target.transcriptFile?.endsWith('.md')
+            ? ' 전사본이 이제 RAG 에 인덱싱되어 ask 가 인용할 수 있습니다.'
+            : ' (전사본 없음 — 보류 해제만 적용.)'),
+      },
+    ],
+  };
 }
 
 /* --------------------------------------------------------------- */
