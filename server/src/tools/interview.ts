@@ -21,6 +21,7 @@ import {
   readSystemPrompt,
   snapshotPersona,
   writeInterviewIndex,
+  whisperModelsDir,
   writeInterviewSession,
   writePersona,
   writeProvenance,
@@ -179,6 +180,13 @@ export const interviewShape = {
     .max(200_000)
     .optional()
     .describe('transcribe 시 저장할 전사본 본문 (STT 결과 또는 Claude polish). --file 로 대상 첨부 지정.'),
+  download: z.boolean().optional().describe('transcribe 시 whisper ggml 모델 다운로드. --model <size> 와 함께.'),
+  listModels: z.boolean().optional().describe('transcribe 시 다운로드된 whisper 모델 목록 표시.'),
+  model: z
+    .string()
+    .max(200)
+    .optional()
+    .describe('--download 시 모델 크기(tiny|base|small|medium|large-v3), 또는 --apply 시 모델 파일 경로 override.'),
 } as const;
 
 interface InterviewArgs {
@@ -215,6 +223,9 @@ interface InterviewArgs {
   limit?: number;
   apply?: boolean;
   text?: string;
+  download?: boolean;
+  listModels?: boolean;
+  model?: string;
 }
 
 /* --------------------------------------------------------------- */
@@ -1205,6 +1216,10 @@ async function abort(args: InterviewArgs): Promise<ToolReply> {
 /* --------------------------------------------------------------- */
 
 async function transcribe(args: InterviewArgs): Promise<ToolReply> {
+  // Model management is session-independent — handle before loading a session.
+  if (args.listModels) return listWhisperModels();
+  if (args.download) return downloadWhisperModel(args.model);
+
   const loaded = await loadSession(args.slug, args.session);
   if ('error' in loaded) return errorReply(loaded.error);
   const session = loaded;
@@ -1253,12 +1268,13 @@ async function transcribe(args: InterviewArgs): Promise<ToolReply> {
 
   // ── Mode 2: --apply → run local whisper on a media attachment ──
   if (args.apply) {
-    const model = process.env.AFTERGLOW_WHISPER_MODEL;
+    const model = await resolveWhisperModel(args.model);
     const target = pickAttachment(session, args.file, true);
     if (!nativeWhisper || !model) {
       return errorReply(
-        `로컬 자동 전사를 실행할 수 없습니다 (whisper=${nativeWhisper ?? '없음'}, model env AFTERGLOW_WHISPER_MODEL=${model ? '설정됨' : '미설정'}). ` +
-          `whisper.cpp 설치 + AFTERGLOW_WHISPER_MODEL=<ggml-*.bin> 설정 후 재시도하거나, 직접 전사 후 --text 로 저장하세요.`,
+        `로컬 자동 전사를 실행할 수 없습니다 (whisper=${nativeWhisper ?? '없음'}, model=${model ?? '없음'}). ` +
+          `whisper.cpp 설치 후, 모델은 action=transcribe --download --model base 로 받거나 AFTERGLOW_WHISPER_MODEL 로 지정하세요. ` +
+          `또는 직접 전사 후 --text 로 저장하세요.`,
       );
     }
     if (!target) return errorReply('전사할 오디오/비디오 첨부를 찾지 못했습니다 (--file 로 지정).');
@@ -1363,6 +1379,109 @@ async function runLocalWhisper(
   target.transcriptFile = tName;
   target.transcriptStatus = 'auto-done';
   return { transcriptFile: tName };
+}
+
+const WHISPER_SIZES = new Set(['tiny', 'base', 'small', 'medium', 'large-v3', 'large-v2', 'large']);
+
+/** Resolve a whisper model path: explicit arg/env > newest downloaded model. */
+async function resolveWhisperModel(explicit?: string): Promise<string | null> {
+  if (explicit) {
+    const p = isAbsolute(explicit) ? explicit : resolve(process.cwd(), explicit);
+    if (await fileExists(p)) return p;
+  }
+  const env = process.env.AFTERGLOW_WHISPER_MODEL;
+  if (env && (await fileExists(env))) return env;
+  // Newest .bin under the managed models dir.
+  try {
+    const dir = whisperModelsDir();
+    const bins = (await fs.readdir(dir)).filter((f) => f.endsWith('.bin'));
+    if (bins.length === 0) return null;
+    let newest = bins[0];
+    let newestMtime = 0;
+    for (const b of bins) {
+      const m = (await fs.stat(resolve(dir, b))).mtimeMs;
+      if (m >= newestMtime) {
+        newestMtime = m;
+        newest = b;
+      }
+    }
+    return resolve(dir, newest);
+  } catch {
+    return null;
+  }
+}
+
+async function fileExists(p: string): Promise<boolean> {
+  try {
+    return (await fs.stat(p)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+async function listWhisperModels(): Promise<ToolReply> {
+  const dir = whisperModelsDir();
+  let bins: { name: string; mb: number }[] = [];
+  try {
+    const names = (await fs.readdir(dir)).filter((f) => f.endsWith('.bin'));
+    for (const n of names) {
+      const st = await fs.stat(resolve(dir, n));
+      bins.push({ name: n, mb: st.size / 1024 / 1024 });
+    }
+  } catch {
+    bins = [];
+  }
+  const lines = [`# whisper 모델 (${dir})`, ''];
+  if (bins.length === 0) {
+    lines.push('(다운로드된 모델 없음)');
+    lines.push('받기: /afterglow interview <slug> --action transcribe --download --model base');
+  } else {
+    for (const b of bins) lines.push(`  · ${b.name}  (${b.mb.toFixed(0)}MB)`);
+  }
+  return { content: [{ type: 'text', text: lines.join('\n') }] };
+}
+
+/**
+ * Download a ggml whisper model into the managed models dir. The base URL is
+ * env-overridable (AFTERGLOW_WHISPER_MODEL_BASEURL) so it's testable against a
+ * local server; default is the public whisper.cpp HF repo. Streams to disk so
+ * multi-GB models don't sit in memory. Best-effort (returns a friendly error).
+ */
+async function downloadWhisperModel(size?: string): Promise<ToolReply> {
+  const s = (size ?? 'base').trim();
+  if (!WHISPER_SIZES.has(s)) {
+    return errorReply(`알 수 없는 모델 크기 "${sanitisePromptLine(s, 40)}". 가능: tiny, base, small, medium, large-v3.`);
+  }
+  const dir = whisperModelsDir();
+  await fs.mkdir(dir, { recursive: true });
+  const dest = resolve(dir, `ggml-${s}.bin`);
+  if (await fileExists(dest)) {
+    return { content: [{ type: 'text', text: `이미 있음: ${dest} (건너뜀). 다시 받으려면 파일을 지우세요.` }] };
+  }
+  const baseUrl =
+    process.env.AFTERGLOW_WHISPER_MODEL_BASEURL ?? 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main';
+  const url = `${baseUrl.replace(/\/$/, '')}/ggml-${s}.bin`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok || !res.body) return errorReply(`다운로드 실패 (${res.status}): ${url}`);
+    const { Readable } = await import('node:stream');
+    const { createWriteStream } = await import('node:fs');
+    const { pipeline } = await import('node:stream/promises');
+    await pipeline(Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]), createWriteStream(dest));
+    const mb = (await fs.stat(dest)).size / 1024 / 1024;
+    await auditAppend({ tool: 'afterglow_interview', summary: `whisper model download · ggml-${s}.bin`, meta: { size: s, mb } });
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `✦ 모델 다운로드 완료: ggml-${s}.bin (${mb.toFixed(0)}MB) → ${dest}\n  이제 transcribe --apply 가 자동으로 이 모델을 사용합니다.`,
+        },
+      ],
+    };
+  } catch (e) {
+    await fs.rm(dest, { force: true }).catch(() => {});
+    return errorReply(`다운로드 중 오류: ${sanitisePromptLine((e as Error).message, 200)}. 오프라인이면 직접 받아 ${dir} 에 두세요.`);
+  }
 }
 
 async function detectWhisper(): Promise<string | null> {

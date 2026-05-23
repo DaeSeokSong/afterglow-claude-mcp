@@ -1,21 +1,22 @@
 /**
- * RAG — retrieval over knowledge/.
+ * RAG — retrieval over knowledge/ + interview transcripts.
  *
- * v0.1.x strategy: **TF-IDF over text chunks** (no external dependencies).
+ * Two backends behind one `retrieve()` entry point:
  *
- *   1. Walk knowledge/ for *.md / *.txt / *.json / *.jsonl / *.csv
- *   2. Tokenize into 800-char chunks with 80-char overlap
- *   3. Compute TF-IDF weights against the agent's corpus
- *   4. Score chunks against the user's query, return top N
- *
- * This is a significant accuracy upgrade over plain token overlap while
- * keeping the package weight-free and offline-safe. The dense-vector
- * backend (OpenAI embeddings, Voyage, bge-m3, …) is a future drop-in:
- * the entry point is `retrieve()` and the on-disk store is `embeddings/`.
+ *   - **lexical (default, 0-dependency, offline)** — BM25 ranking over text
+ *     chunks. BM25 adds term-frequency saturation (k1) and length
+ *     normalization (b), which is a real accuracy upgrade over the old
+ *     TF-IDF cosine and needs no model/API.
+ *   - **dense (opt-in)** — embeddings via an OpenAI-compatible endpoint
+ *     (`AFTERGLOW_RAG_BACKEND=dense` + `AFTERGLOW_EMBED_ENDPOINT`). Chunk
+ *     vectors are cached under `embeddings/`. Any failure (no endpoint,
+ *     network error) transparently falls back to lexical, so the package
+ *     stays weight-free and offline-safe by default.
  */
 import { promises as fs } from 'node:fs';
 import { join, extname } from 'node:path';
-import { knowledgeDir, interviewsDir, agentExists, AgentNotFoundError } from './storage.js';
+import { createHash } from 'node:crypto';
+import { knowledgeDir, interviewsDir, embeddingsDir, agentExists, AgentNotFoundError } from './storage.js';
 
 const ALLOWED_EXT = new Set(['.md', '.txt', '.json', '.jsonl', '.csv']);
 // Interview transcripts are searchable, but the structural session.json /
@@ -41,7 +42,7 @@ export interface Chunk {
 
 export interface Retrieval {
   chunk: Chunk;
-  /** TF-IDF score against the query (higher = more relevant) */
+  /** relevance score against the query (higher = more relevant) */
   score: number;
 }
 
@@ -103,73 +104,164 @@ async function ingest(path: string, all: Chunk[]): Promise<void> {
 }
 
 /* --------------------------------------------------------------- */
-/* TF-IDF                                                          */
+/* Lexical ranking — BM25 (default, 0-dependency, offline)         */
 /* --------------------------------------------------------------- */
 
-interface TermFrequency {
-  /** total term count for normalization */
-  total: number;
-  counts: Map<string, number>;
-}
+const BM25_K1 = 1.5; // term-frequency saturation
+const BM25_B = 0.75; // length normalization strength
 
-function termFrequencies(tokens: string[]): TermFrequency {
-  const counts = new Map<string, number>();
-  for (const t of tokens) counts.set(t, (counts.get(t) ?? 0) + 1);
-  return { total: tokens.length, counts };
-}
-
-function inverseDocumentFrequency(docTokenSets: Set<string>[]): Map<string, number> {
-  const N = docTokenSets.length;
-  const df = new Map<string, number>();
-  for (const set of docTokenSets) {
-    for (const t of set) df.set(t, (df.get(t) ?? 0) + 1);
-  }
-  const idf = new Map<string, number>();
-  for (const [t, n] of df) {
-    // add-1 smoothing to avoid IDF blowing up on rare query terms
-    idf.set(t, Math.log((N + 1) / (n + 1)) + 1);
-  }
-  return idf;
-}
-
-export async function retrieve(slug: string, query: string, topK = 4): Promise<Retrieval[]> {
-  const chunks = await loadChunks(slug);
-  if (chunks.length === 0) return [];
-
-  const qTokens = tokenize(query);
+export function bm25Rank(chunks: Chunk[], query: string, topK: number): Retrieval[] {
+  const qTokens = [...new Set(tokenize(query))];
   if (qTokens.length === 0) return [];
 
   const docTokens = chunks.map((c) => tokenize(c.text));
-  const docSets = docTokens.map((t) => new Set(t));
-  const idf = inverseDocumentFrequency(docSets);
+  const N = chunks.length;
+  const avgdl = (docTokens.reduce((s, d) => s + d.length, 0) / (N || 1)) || 1;
 
-  const qSet = new Set(qTokens);
-  const qIdfNorm =
-    Math.sqrt([...qSet].reduce((acc, t) => acc + (idf.get(t) ?? 0) ** 2, 0)) || 1;
+  const tfPerDoc = docTokens.map((toks) => {
+    const m = new Map<string, number>();
+    for (const t of toks) m.set(t, (m.get(t) ?? 0) + 1);
+    return m;
+  });
+
+  // document frequency for each query term
+  const df = new Map<string, number>();
+  for (const t of qTokens) {
+    let n = 0;
+    for (const m of tfPerDoc) if (m.has(t)) n++;
+    df.set(t, n);
+  }
+  const idf = (t: string): number => {
+    const n = df.get(t) ?? 0;
+    // BM25 IDF with +1 so common terms never go negative.
+    return Math.log(1 + (N - n + 0.5) / (n + 0.5));
+  };
 
   const scored: Retrieval[] = chunks.map((chunk, i) => {
-    const tf = termFrequencies(docTokens[i]);
-    if (tf.total === 0) return { chunk, score: 0 };
-
-    let dot = 0;
-    let docNormSq = 0;
-    for (const [term, count] of tf.counts) {
-      const weight = (count / tf.total) * (idf.get(term) ?? 0);
-      docNormSq += weight * weight;
-      if (qSet.has(term)) {
-        // Query weight = IDF only (no TF in the query — short by definition).
-        dot += weight * (idf.get(term) ?? 0);
-      }
+    const dl = docTokens[i].length || 1;
+    const tf = tfPerDoc[i];
+    let score = 0;
+    for (const t of qTokens) {
+      const f = tf.get(t) ?? 0;
+      if (f === 0) continue;
+      score += idf(t) * ((f * (BM25_K1 + 1)) / (f + BM25_K1 * (1 - BM25_B + BM25_B * (dl / avgdl))));
     }
-    const docNorm = Math.sqrt(docNormSq) || 1;
-    const cos = dot / (docNorm * qIdfNorm);
-    return { chunk, score: cos };
+    return { chunk, score };
   });
 
   return scored
     .filter((r) => r.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
+}
+
+/* --------------------------------------------------------------- */
+/* Dense ranking — pluggable embeddings (opt-in)                   */
+/* --------------------------------------------------------------- */
+
+export function ragBackend(): 'lexical' | 'dense' {
+  return process.env.AFTERGLOW_RAG_BACKEND === 'dense' ? 'dense' : 'lexical';
+}
+
+/**
+ * Embed text via an OpenAI-compatible `/embeddings` endpoint. Returns null
+ * (→ caller falls back to lexical) when no endpoint is configured or the call
+ * fails — keeping the default path offline and dependency-free.
+ */
+async function embedText(text: string): Promise<number[] | null> {
+  const endpoint = process.env.AFTERGLOW_EMBED_ENDPOINT;
+  if (!endpoint) return null;
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(process.env.AFTERGLOW_EMBED_KEY ? { authorization: `Bearer ${process.env.AFTERGLOW_EMBED_KEY}` } : {}),
+      },
+      body: JSON.stringify({
+        input: text.slice(0, 8_000),
+        model: process.env.AFTERGLOW_EMBED_MODEL ?? 'text-embedding-3-small',
+      }),
+    });
+    if (!res.ok) return null;
+    const json = (await res.json()) as { data?: { embedding?: number[] }[] };
+    const vec = json.data?.[0]?.embedding;
+    return Array.isArray(vec) && vec.length > 0 ? vec : null;
+  } catch {
+    return null;
+  }
+}
+
+function cosine(a: number[], b: number[]): number {
+  let dot = 0;
+  let na = 0;
+  let nb = 0;
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
+}
+
+/** Embed a chunk, caching the vector under embeddings/<contenthash>.json so
+ *  we don't re-embed the same chunk on every query. */
+async function embedChunkCached(slug: string, text: string): Promise<number[] | null> {
+  const key = createHash('sha256').update(text).digest('hex').slice(0, 32);
+  const cachePath = join(embeddingsDir(slug), `vec-${key}.json`);
+  try {
+    const v = JSON.parse(await fs.readFile(cachePath, 'utf8')) as number[];
+    if (Array.isArray(v) && v.length > 0) return v;
+  } catch {
+    /* cache miss */
+  }
+  const v = await embedText(text);
+  if (v) {
+    try {
+      await fs.mkdir(embeddingsDir(slug), { recursive: true });
+      await fs.writeFile(cachePath, JSON.stringify(v), 'utf8');
+    } catch {
+      /* cache write best-effort */
+    }
+  }
+  return v;
+}
+
+async function denseRetrieve(
+  slug: string,
+  chunks: Chunk[],
+  query: string,
+  topK: number,
+): Promise<Retrieval[] | null> {
+  const qv = await embedText(query);
+  if (!qv) return null; // no provider / failed → caller falls back to lexical
+  const scored: Retrieval[] = [];
+  for (const chunk of chunks) {
+    const cv = await embedChunkCached(slug, chunk.text);
+    if (!cv) return null; // provider failed mid-stream → fall back
+    scored.push({ chunk, score: cosine(qv, cv) });
+  }
+  return scored
+    .filter((r) => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
+}
+
+/* --------------------------------------------------------------- */
+/* Entry point                                                     */
+/* --------------------------------------------------------------- */
+
+export async function retrieve(slug: string, query: string, topK = 4): Promise<Retrieval[]> {
+  const chunks = await loadChunks(slug);
+  if (chunks.length === 0) return [];
+  if (tokenize(query).length === 0) return [];
+
+  if (ragBackend() === 'dense') {
+    const dense = await denseRetrieve(slug, chunks, query, topK);
+    if (dense) return dense; // else transparently fall through to lexical
+  }
+  return bm25Rank(chunks, query, topK);
 }
 
 /* --------------------------------------------------------------- */

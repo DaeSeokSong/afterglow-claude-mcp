@@ -295,7 +295,7 @@ Afterglow/
 │  │  ├─ portable.ts       ← 번들 manifest + 해시 + 인젝션 스캔
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 24 도구: …+ interview · export · import · verify · status · gc
-│  └─ test/                ← vitest 201 + stdio 핸드셰이크 (24 도구)
+│  └─ test/                ← vitest 208 + stdio 핸드셰이크 (24 도구)
 │
 └─ docs/
    └─ design-source/       ← claude.ai/design 핸드오프 원본 (JSX) — 참조용
@@ -390,13 +390,15 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 - [x] **전체 대시보드** (`afterglow_status`) + **보존/정리** (`afterglow_gc` — 스냅샷 prune · 미디어 purge · 보관함 영구삭제)
 - [x] **전사** (`interview transcribe` — 로컬 whisper `--apply` / Claude polish `--text`) + **회차 전 질문 제안** (`suggest-questions`) + **검토 후 인덱싱** (`review`)
 - [x] **import `--expectAnchor`** (번들 위변조 탐지) + **audit checkpoint/fast** (대용량 증분 검증)
-- [x] vitest 201개 + stdio 핸드셰이크 (24 도구 전체 검증)
+- [x] **BM25 RAG 랭킹** + opt-in **dense-vector 백엔드** (`AFTERGLOW_RAG_BACKEND=dense` · embeddings/ 캐시 · 실패 시 렉시컬 fallback)
+- [x] **whisper 모델 관리** (`transcribe --download/--list-models` + 자동 해석)
+- [x] vitest 208개 + stdio 핸드셰이크 (24 도구 전체 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 - [x] **핸즈온 Jupyter 노트북** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — 초보자용 전 기능 따라하기
 
 ### 다음
-- [ ] 미디어 자동 전사 모델 번들 (whisper.cpp WASM lazy-download — 코드 경로는 완비, 모델만 옵트인)
-- [ ] dense-vector RAG · Web companion · Slack 연동
+- [ ] whisper.cpp WASM 엔진 번들 (모델 lazy-download 까지 완전 자동)
+- [ ] per-tool ACL · 정기 retention 자동화 · Web companion
 
 [기여 환영](https://github.com/DaeSeokSong/Afterglow/issues/new) — 이슈 / PR / 사용 사례 모두 좋아요.
 

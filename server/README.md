@@ -237,6 +237,8 @@ sequenceDiagram
 </table>
 
 > v0.3 에서 <code>interview</code> 에 <b>suggest-questions</b>(회차 전 질문 제안) · <b>transcribe</b>(<code>--text</code> 폴리시 저장 / <code>--apply</code> 로컬 whisper) · <b>review</b>(검토 후 인덱싱) 액션이, <code>import</code> 에 <b>--expectAnchor</b>(번들 위변조 탐지), <code>audit</code> 에 <b>--checkpoint/--fast</b>(대용량 증분 검증)가 추가됐습니다.
+>
+> v0.4 에서 RAG 랭킹이 <b>BM25</b> 로 업그레이드(+ opt-in <b>dense-vector</b> 백엔드 `AFTERGLOW_RAG_BACKEND=dense`), <code>transcribe</code> 에 <b>--download/--list-models</b>(ggml 모델 관리)가 추가됐습니다.
 
 <details>
 <summary><b>입력 스키마 자세히 보기</b></summary>
@@ -395,7 +397,7 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (201 tests — +integration 6 +v03 9, etc.)
+npm test                   # vitest (208 tests — +integration 6 +v03 9, etc.)
 npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (24 도구 모두 happy-path + v0.3 기능 라운드트립)
 npm run test:all           # 전체 (unit → build → stdio)
 ```
@@ -443,7 +445,7 @@ server/
 │  ├─ phase6.test.ts    ← vitest (71 tests — handoff / version / access / correct + P0 보안 회귀)
 │  ├─ interview.test.ts ← vitest (23 tests — 인터뷰 전 흐름 + 갭/첨부/주석/이중서명 + 보안)
 │  ├─ portable.test.ts  ← vitest (16 tests — export/import/verify 라운드트립 + 변조/인젝션/충돌)
-│  └─ stdio.smoke.mjs   ← 실제 MCP stdio 핸드셰이크 (24 도구 + v0.3 라운드트립)
+│  └─ stdio.smoke.mjs   ← 실제 MCP stdio 핸드셰이크 (24 도구 + v0.3/v0.4 라운드트립)
 ├─ tsconfig.json
 ├─ vitest.config.ts
 └─ package.json
@@ -493,9 +495,11 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 - [x] **전체 대시보드 `afterglow_status`** + **보존/정리 `afterglow_gc`**(스냅샷 prune·미디어 purge·보관함 삭제)
 - [x] **전사 `transcribe`**(로컬 whisper `--apply` / Claude polish `--text`) + **suggest-questions**(회차 전 질문 제안) + **review**(검토 후 인덱싱)
 - [x] **import `--expectAnchor`**(번들 위변조 탐지) + **audit checkpoint**(대용량 증분 검증)
-- [x] vitest 201개 + 24 도구 stdio 핸드셰이크
-- [ ] 미디어 자동 전사 모델 번들 (whisper.cpp WASM lazy-download)
-- [ ] dense-vector RAG · Web companion · Slack 연동
+- [x] **BM25 RAG** + opt-in **dense-vector 백엔드** (`AFTERGLOW_RAG_BACKEND=dense`, embeddings/ 캐시)
+- [x] **whisper 모델 관리** (`transcribe --download/--list-models` + 자동 해석)
+- [x] vitest 208개 + 24 도구 stdio 핸드셰이크
+- [ ] whisper.cpp WASM 엔진 번들 (모델 lazy-download 까지 완전 자동)
+- [ ] per-tool ACL · Web companion · 정기 retention 자동화
 
 [기여 환영](https://github.com/DaeSeokSong/Afterglow/issues/new) — 이슈 / PR / 사용 사례 모두 좋아요.
 
