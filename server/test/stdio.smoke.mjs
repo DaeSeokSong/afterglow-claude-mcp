@@ -10,7 +10,7 @@
  *   → export → verify → import → status → gc → suggest-questions
  *   → transcribe → audit checkpoint
  *
- * Verifies tool count (24), names, and that each call returns a content block.
+ * Verifies tool count (25), names, and that each call returns a content block.
  *
  * Run as: node test/stdio.smoke.mjs
  */
@@ -19,6 +19,21 @@ import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createServer } from 'node:http';
+
+// Mock Slack Incoming Webhook — captures the last posted payload.
+let slackReceived = null;
+const slackServer = createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => (body += c));
+  req.on('end', () => {
+    try { slackReceived = JSON.parse(body); } catch { slackReceived = null; }
+    res.writeHead(200);
+    res.end('ok');
+  });
+});
+await new Promise((resolve) => slackServer.listen(0, '127.0.0.1', resolve));
+const slackWebhook = `http://127.0.0.1:${slackServer.address().port}`;
 
 const tmpRoot = await mkdtemp(join(tmpdir(), 'afterglow-stdio-'));
 const env = { ...process.env, AFTERGLOW_ROOT: tmpRoot };
@@ -104,6 +119,7 @@ const EXPECTED_TOOLS = [
   'afterglow_recalibrate',
   'afterglow_resume',
   'afterglow_sign',
+  'afterglow_slack',
   'afterglow_status',
   'afterglow_verify',
   'afterglow_version',
@@ -486,6 +502,12 @@ try {
   const fast = assertOk('audit-fast', await callTool('afterglow_audit', { fast: true, json: true }));
   if (!JSON.parse(fast.content[0].text).verification?.ok) throw new Error('audit fast verify: not ok');
 
+  // slack — post a digest to the local mock webhook
+  assertOk('slack-digest', await callTool('afterglow_slack', { action: 'digest', webhook: slackWebhook }));
+  if (!slackReceived || !/상태 요약/.test(slackReceived.text ?? '')) {
+    throw new Error('slack digest: mock webhook did not receive expected payload');
+  }
+
   // council_summary on the latest transcript
   const summary = assertOk(
     'council_summary',
@@ -523,11 +545,13 @@ try {
   console.log(`  v0.3 dashboard     : status (${statusJson.totals.agents} agents) + gc list/dry-run  OK`);
   console.log(`  v0.3 suggest/transc: suggest-questions + transcribe --text save  OK`);
   console.log(`  v0.3 audit         : checkpoint (${cpJson.checkpoints}) + fast verify  OK`);
+  console.log(`  v0.4 slack         : digest posted to mock webhook  OK`);
 } catch (err) {
   console.error('smoke: FAIL');
   console.error(err instanceof Error ? err.stack : String(err));
   process.exitCode = 1;
 } finally {
   child.kill();
+  slackServer.close();
   await rm(tmpRoot, { recursive: true, force: true });
 }

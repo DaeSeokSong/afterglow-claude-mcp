@@ -172,6 +172,11 @@ export function provenancePath(slug: string): string {
   return join(agentDir(slug), 'provenance.json');
 }
 
+/** Global (not per-agent) directory for downloaded whisper ggml models. */
+export function whisperModelsDir(): string {
+  return join(rootDir(), 'whisper', 'models');
+}
+
 /* --------------------------------------------------------------- */
 /* Slug validation                                                 */
 /* --------------------------------------------------------------- */

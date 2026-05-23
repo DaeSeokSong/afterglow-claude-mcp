@@ -7,7 +7,7 @@
  *
  *   claude mcp add afterglow npx @daeseoksong/afterglow-mcp
  *
- * The server exposes 22 tools that mirror the slash commands in the design:
+ * The server exposes 25 tools that mirror the slash commands in the design:
  *   - afterglow_init             (/afterglow init)
  *   - afterglow_create           (/afterglow create <slug> …)
  *   - afterglow_list             (/afterglow list)
@@ -28,11 +28,15 @@
  *   - afterglow_access           (/afterglow access <slug> --action list|allow|deny|set-default|check)
  *   - afterglow_interview        (/afterglow interview <slug> --action start|add-question|answer|gap-check|attach|review|annotate|status|list|inspect|finalize|abort|transcribe)
  *   - afterglow_export           (/afterglow export --slugs … | --all)
- *   - afterglow_import           (/afterglow import <path> [--as | --merge | --dryRun])
+ *   - afterglow_import           (/afterglow import <path> [--as | --merge | --dryRun | --expectAnchor])
  *   - afterglow_verify           (/afterglow verify <path>)
+ *   - afterglow_status           (/afterglow status)
+ *   - afterglow_gc               (/afterglow gc --action list|prune-versions|purge-media|purge-archive)
+ *   - afterglow_slack            (/afterglow slack --action test|digest|share)
  *
- * `ask`, `council` and `interview gap-check` do NOT call an LLM. They return
- * persona + RAG context so Claude in the user's session composes the answer.
+ * `ask`, `council`, `interview gap-check` and `interview suggest-questions` do
+ * NOT call an LLM. They return persona + RAG context so Claude in the user's
+ * session composes the answer. RAG ranks with BM25 (or an opt-in dense backend).
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -61,9 +65,10 @@ import { importShape, runImport } from './tools/import.js';
 import { verifyShape, runVerify } from './tools/verify.js';
 import { statusShape, runStatus } from './tools/status.js';
 import { gcShape, runGc } from './tools/gc.js';
+import { slackShape, runSlack } from './tools/slack.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.3.0';
+const SERVER_VERSION = '0.4.0';
 
 export function buildServer(): McpServer {
   const server = new McpServer(
@@ -76,8 +81,8 @@ export function buildServer(): McpServer {
         '퇴사자 에이전트 폴더(~/.claude/afterglow/)를 관리하는 MCP 서버. ' +
         'init → create → handoff(본인 인계 검수) → sign → list → inspect → ask, ' +
         '그리고 edit / resume / council / council_summary / history / audit / recalibrate / correct / archive / version / access, ' +
-        '추가로 interview(인계자 주도 다중 인터뷰 + 갭 감지 + 음성·영상) / export / import / verify(핫플러그) 까지 ' +
-        '22 개 도구로 한 사람의 폴더 단위로 페르소나·자료·권한·감사·보관·버전·본인 검수·추가 인터뷰·이식을 다룹니다.',
+        '추가로 interview(인계자 주도 다중 인터뷰 + 갭 감지 + 음성·영상 + 전사) / export / import / verify(핫플러그) / status(대시보드) / gc(보존정리) / slack 까지 ' +
+        '25 개 도구로 한 사람의 폴더 단위로 페르소나·자료·권한·감사·보관·버전·본인 검수·추가 인터뷰·이식·운영을 다룹니다.',
     },
   );
 
@@ -345,6 +350,17 @@ export function buildServer(): McpServer {
       inputSchema: gcShape,
     },
     wrap(runGc),
+  );
+
+  server.registerTool(
+    'afterglow_slack',
+    {
+      title: 'Afterglow — Slack 연동',
+      description:
+        'Slack Incoming Webhook 으로 상태를 전송합니다. action=test(연결 확인) | digest(전체 상태 요약) | share(특정 에이전트 요약). webhook 은 env AFTERGLOW_SLACK_WEBHOOK 또는 --webhook.',
+      inputSchema: slackShape,
+    },
+    wrap(runSlack),
   );
 
   return server;
