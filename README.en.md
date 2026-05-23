@@ -79,7 +79,7 @@ claude /afterglow ask jiyoon "Onboarding step-3 drop-off — how did you cut it?
       </td>
       <td>
         <a href="https://www.npmjs.com/package/@daeseoksong/afterglow-mcp"><code>@daeseoksong/afterglow-mcp</code></a> on npm.<br>
-        Register it and Claude Code gets 18 slash commands (<code>init · create · handoff · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · correct · archive · version · access</code>).
+        Register it and Claude Code gets 22 slash commands (<code>init · create · handoff · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · correct · archive · version · access · interview · export · import · verify</code>).
       </td>
     </tr>
     <tr>
@@ -183,6 +183,45 @@ This delivers on the core promise:
 
 `afterglow_sign` / `handoff finalize` **trust the `signer` string verbatim** — they record it in `consent.md` and `audit.log` but do **not** perform identity verification (SSO / MFA). This is a deliberate PoC choice: in production, wrap the tool with SSO tokens, corporate ID checks, or an HR approval system.
 
+## 🎤 Follow-up interviews (v0.2) — the successor interviews the leaver
+
+Where `handoff` is the leaver's **one-time self-review**, `interview` is the flow where **the successor (the person taking over) interviews the leaver across multiple rounds** — because once you actually touch the material, new questions surface and gaps the leaver missed become obvious.
+
+```bash
+claude /afterglow interview jiyoon --action start --title "Payment gaps" --interviewer "J. Kim" --interviewee "Jiyoon Lee"
+claude /afterglow interview jiyoon --action add-question --session 001-payment-gaps --question "Policy after the 5s timeout?"
+claude /afterglow interview jiyoon --action answer --session 001-payment-gaps --id q-… --answer "Fail over to the next PG" --source voice
+claude /afterglow interview jiyoon --action gap-check --session 001-payment-gaps   # auto-detect what's missing → follow-ups
+claude /afterglow interview jiyoon --action attach --session 001-payment-gaps --file ./rec.mp3 --transcript ./rec.txt --speakers "Jiyoon Lee,J. Kim"
+claude /afterglow interview jiyoon --action finalize --session 001-payment-gaps --signRole interviewer --signer "J. Kim"
+claude /afterglow interview jiyoon --action finalize --session 001-payment-gaps --signRole interviewee --signer "Jiyoon Lee"
+```
+
+- **Gap detection** (`gap-check`): analyses answers against four signals (internal contradiction, source conflict, conflict with prior rounds, adjacent-but-uncovered) and generates *"this seems missing — is that right?"* confirmation questions. Like `ask`, it bundles context for Claude to compose — **no extra LLM call**.
+- **Audio/video attach** (`attach`): originals are preserved; only the transcript (`.md`/`.txt`) is RAG-indexed. Audio/video **require** `--speakers`.
+- **Absent interviewee** (`--intervieweeAbsent`): if the leaver is already gone, the successor records clearly-marked "estimate ⚠ (unverified)" annotations — allowed only if the leaver pre-authorised it via `handoff … --allowProxyAnnotation`.
+- **Dual signature**: both interviewer and interviewee must sign to reach `finalized`. Answers are absorbed into `persona.bio` as `## 인터뷰 보강 #N` blocks and cited from the next `ask` on.
+
+## 🔌 Hot-plug (v0.2) — hand an agent folder to another user
+
+Export an agent and **another Afterglow user picks it up instantly** — one agent or many at once.
+
+```bash
+# ── Sender: export ──
+claude /afterglow export --slugs jiyoon jaehoon --exportedBy "Jiyoon Lee"   # or --all
+#   → creates ./afterglow-export-<date>/ (manifest.json + per-agent integrity hash)
+#   → zip/tar the folder and send it, or copy via USB / shared drive
+
+# ── Receiver: verify → import ──
+claude /afterglow verify  ./afterglow-export-…/                              # read-only pre-flight
+claude /afterglow import  ./afterglow-export-…/ --importedBy "J. Kim" --from "Jiyoon Lee" --trustSigner "Jiyoon Lee"
+#   → signed agents land as active, unsigned as paused
+```
+
+`import` automatically checks: **schema** (zod) · **integrity hash** (rejects tampered bundles; `--acceptBrokenChain` to force, recorded as `trustLevel: broken-chain`) · **signature presence** · **symlink stripping** (blocks a bundle whose link points at `~/.ssh/id_rsa`) · **prompt-injection scan**. Provenance is written to `provenance.json`, after which every `ask` answer carries an "imported" banner. Slug collisions resolve with `--as <new-slug>` or `--merge` (interview rounds only). A bare `agents/<slug>/` folder imports too — the "I just copied one folder" case.
+
+> **New to this?** The hands-on notebook [`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb) walks install → create → interview → export/import as copy-paste cells.
+
 ## 🧭 Core ideas
 
 - **🪶 Persona + RAG, not fine-tuning.** Inject the person's tone and sources into Claude's context — fully compatible with Claude Code.
@@ -252,12 +291,12 @@ Afterglow/
 │  │  ├─ index.ts          ← stdio entrypoint (McpServer + StdioServerTransport)
 │  │  ├─ storage.ts        ← ~/.claude/afterglow/ filesystem adapter
 │  │  ├─ persona.ts        ← zod schema + system-prompt rendering
-│  │  ├─ rag.ts            ← TF-IDF retrieval (drop-in swap point)
+│  │  ├─ interview.ts      ← interview/attachment/signature/provenance schema
+│  │  ├─ portable.ts       ← bundle manifest + folder hash + injection scan
+│  │  ├─ rag.ts            ← TF-IDF retrieval (knowledge/ + interview transcripts)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
-│  │  └─ tools/            ← 18 tools: init · create · handoff · sign · resume · list
-│  │                         inspect · ask · edit · council · council_summary · history
-│  │                         audit · recalibrate · correct · archive · version · access
-│  └─ test/                ← 135 vitest + stdio handshake (covers all 18 tools)
+│  │  └─ tools/            ← 22 tools: …18 above… + interview · export · import · verify
+│  └─ test/                ← 184 vitest + stdio handshake (covers all 22 tools)
 │
 └─ docs/
    └─ design-source/       ← original claude.ai/design hand-off (JSX) — reference
@@ -283,8 +322,13 @@ Afterglow/
    ├─ history.log
    ├─ access.json            ← call permission policy (afterglow_access)
    ├─ handoff.json           ← self-review session state (afterglow_handoff)
+   ├─ followup.json          ← follow-up interview pre-authorisation (handoff → interview)
+   ├─ provenance.json        ← origin · trust · custody trail (written by afterglow_import)
    ├─ corrections.log        ← user-correction trail (afterglow_correct)
    ├─ .versions/             ← persona snapshots (afterglow_version)
+   ├─ interviews/            ← multi-round interviews (afterglow_interview)
+   │  ├─ index.json          ← round index
+   │  └─ <NNN-title>/session.json + attachments/ (audio·video + transcripts)
    ├─ knowledge/             ← raw sources (PDF · MD · TXT · CSV · JSONL)
    └─ embeddings/            ← RAG index (PoC: TF-IDF; later: dense vectors)
 ```
@@ -305,14 +349,14 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 135 vitest tests
-npm run test:stdio   # real MCP stdio handshake (all 18 tools)
+npm test             # 184 vitest tests
+npm run test:stdio   # real MCP stdio handshake (all 22 tools + interview/hot-plug round-trips)
 npm run test:all     # unit → build → stdio
 ```
 
 ## ⚠ Known PoC limits
 
-Afterglow v0.1.3 is a **proof of concept**. Things to know before pulling it into production:
+Afterglow v0.2.0 is a **proof of concept**. Things to know before pulling it into production:
 
 | Area | Current behaviour | What you'd add for production |
 | --- | --- | --- |
@@ -324,26 +368,32 @@ Afterglow v0.1.3 is a **proof of concept**. Things to know before pulling it int
 | **GDPR delete** | `archive` only moves to `archive/<slug>/` — not real deletion | After retention window, manual `rm -rf` + registry edit |
 | **Multi-process** | In-process locks only — assumes one stdio server | Externalise to Redis/DB mutex for distributed runs |
 | **Side-log integrity** | Only `audit.log` is hash-chained — `history.log` / `consent.md` etc are plain text | Hash sibling files into audit `meta` for full coverage |
+| **Media transcription** | Tier 0 only (bring-your-own transcript) — no built-in speech-to-text | Opt-in local whisper.cpp (Tier 1) / external STT API (Tier 2) |
+| **Import trust** | Name-string match + folder hash + injection scan (PoC) | Tie to signer PKI / corporate ID verification |
 
 These are deliberate PoC trade-offs; closing them is a separate exercise for any operational deployment.
 
 ## 🗺 Roadmap
 
-### Now (v0.1.3)
+### Now (v0.2.0)
 - [x] 18-screen interactive proposal (Vite + React 19 + TS)
 - [x] Cmd+K palette + keyboard shortcuts + cross-screen click navigation
-- [x] All 18 MCP tools (`init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access`)
+- [x] All 22 MCP tools (`init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · **`interview`** · **`export`** · **`import`** · **`verify`**)
 - [x] zod persona schema + auto-rendered system prompt
-- [x] TF-IDF RAG retrieval (no external deps)
+- [x] TF-IDF RAG retrieval (no external deps) — `knowledge/` + interview transcripts
 - [x] SHA-256 hash-chained audit log + verifier
 - [x] Consent.md sign workflow (draft → active gate on `ask` / `council`)
 - [x] Recalibrate: global + **expertise-aware by-topic** diagnostic
 - [x] **`afterglow_archive`** — archive / restore agents (archive/<slug>/ separate folder; restore lands in paused)
 - [x] **Council moderator** — stronger consensus rules + `afterglow_council_summary` auto-summarizer
-- [x] 135 vitest + extended stdio handshake (covers every tool)
+- [x] **Multi-round interviews** (`afterglow_interview`) — successor-driven N rounds + **auto gap detection** + **audio/video attach** + dual signature
+- [x] **Hot-plug** (`afterglow_export · import · verify`) — multi-agent bundle transfer + integrity hash · prompt-injection scan · symlink stripping · `provenance` trail
+- [x] 184 vitest + extended stdio handshake (covers all 22 tools)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
+- [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
 
 ### Next
+- [ ] Media auto-transcription Tier 1/2 (bundled local whisper.cpp / opt-in external STT)
 - [ ] Web companion: shareable read-only "afterglow page" per agent
 - [ ] Slack integration
 
