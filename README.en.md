@@ -79,7 +79,7 @@ claude /afterglow ask jiyoon "Onboarding step-3 drop-off — how did you cut it?
       </td>
       <td>
         <a href="https://www.npmjs.com/package/@daeseoksong/afterglow-mcp"><code>@daeseoksong/afterglow-mcp</code></a> on npm.<br>
-        Register it and Claude Code gets 24 slash commands (<code>init · create · handoff · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · correct · archive · version · access · interview · export · import · verify · status · gc</code>).
+        Register it and Claude Code gets 25 slash commands (<code>init · create · handoff · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · correct · archive · version · access · interview · export · import · verify · status · gc · slack</code>).
       </td>
     </tr>
     <tr>
@@ -296,7 +296,7 @@ Afterglow/
 │  │  ├─ rag.ts            ← TF-IDF retrieval (knowledge/ + interview transcripts)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 22 tools: …18 above… + interview · export · import · verify
-│  └─ test/                ← 201 vitest + stdio handshake (covers all 24 tools)
+│  └─ test/                ← 201 vitest + stdio handshake (covers all 25 tools)
 │
 └─ docs/
    └─ design-source/       ← original claude.ai/design hand-off (JSX) — reference
@@ -349,8 +349,8 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 201 vitest tests
-npm run test:stdio   # real MCP stdio handshake (all 24 tools + v0.3 round-trips)
+npm test             # 213 vitest tests
+npm run test:stdio   # real MCP stdio handshake (all 25 tools + v0.3/v0.4 round-trips)
 npm run test:all     # unit → build → stdio
 ```
 
@@ -378,7 +378,7 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 ### Now (v0.3.0)
 - [x] 18-screen interactive proposal (Vite + React 19 + TS)
 - [x] Cmd+K palette + keyboard shortcuts + cross-screen click navigation
-- [x] All 24 MCP tools (`init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · **`interview`** · **`export`** · **`import`** · **`verify`** · **`status`** · **`gc`**)
+- [x] All 25 MCP tools (`init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · **`interview`** · **`export`** · **`import`** · **`verify`** · **`status`** · **`gc`**)
 - [x] zod persona schema + auto-rendered system prompt
 - [x] TF-IDF RAG retrieval (no external deps) — `knowledge/` + interview transcripts
 - [x] SHA-256 hash-chained audit log + verifier
@@ -391,13 +391,16 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 - [x] **Global dashboard** (`afterglow_status`) + **retention/GC** (`afterglow_gc` — snapshot prune · media purge · archive hard-delete)
 - [x] **Transcription** (`interview transcribe` — local whisper `--apply` / Claude polish `--text`) + **pre-interview question suggestions** (`suggest-questions`) + **review-then-index** (`review`)
 - [x] **import `--expectAnchor`** (bundle-tamper detection) + **audit checkpoint/fast** (incremental verification for large logs)
-- [x] 201 vitest + extended stdio handshake (covers all 24 tools)
+- [x] **BM25 ranking** + opt-in **dense-vector backend** (`AFTERGLOW_RAG_BACKEND=dense` · embeddings/ cache · transparent lexical fallback)
+- [x] **whisper model management** (`transcribe --download/--list-models` + auto-resolution)
+- [x] **Slack integration** (`afterglow_slack` — test/digest/share via Incoming Webhook)
+- [x] 213 vitest + extended stdio handshake (covers all 25 tools)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 - [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
 
 ### Next
-- [ ] Bundled media transcription model (whisper.cpp WASM lazy-download — code path ready, model opt-in)
-- [ ] dense-vector RAG · Web companion · Slack integration
+- [ ] Bundled whisper.cpp WASM engine (fully automatic incl. model lazy-download)
+- [ ] per-tool ACL · scheduled retention · Web companion
 
 [Issues & PRs welcome](https://github.com/DaeSeokSong/Afterglow/issues/new).
 

@@ -79,7 +79,7 @@ claude /afterglow ask jiyoon "온보딩 step 3 이탈, 어떻게 줄였어요?"
       </td>
       <td>
         <a href="https://www.npmjs.com/package/@daeseoksong/afterglow-mcp"><code>@daeseoksong/afterglow-mcp</code></a> npm 패키지.<br>
-        Claude Code에 등록하면 <code>init · create · handoff · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · correct · archive · version · access · interview · export · import · verify · status · gc</code> 24 개 슬래시 명령이 동작.
+        Claude Code에 등록하면 <code>init · create · handoff · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · correct · archive · version · access · interview · export · import · verify · status · gc · slack</code> 25 개 슬래시 명령이 동작.
       </td>
     </tr>
     <tr>
@@ -294,8 +294,8 @@ Afterglow/
 │  │  ├─ interview.ts      ← 인터뷰/첨부/서명/provenance 스키마
 │  │  ├─ portable.ts       ← 번들 manifest + 해시 + 인젝션 스캔
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
-│  │  └─ tools/            ← 24 도구: …+ interview · export · import · verify · status · gc
-│  └─ test/                ← vitest 201 + stdio 핸드셰이크 (24 도구)
+│  │  └─ tools/            ← 25 도구: …+ interview · export · import · verify · status · gc · slack
+│  └─ test/                ← vitest 213 + stdio 핸드셰이크 (25 도구)
 │
 └─ docs/
    └─ design-source/       ← claude.ai/design 핸드오프 원본 (JSX) — 참조용
@@ -377,7 +377,7 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 ### 현재 (v0.3.0)
 - [x] 18 화면 인터랙티브 제안서 (Vite + React 19 + TS)
 - [x] Cmd+K 팔레트 + 키보드 단축키 + 화면 간 클릭 네비
-- [x] **MCP 서버 24 도구**: `init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · **`interview`** · **`export`** · **`import`** · **`verify`** · **`status`** · **`gc`**
+- [x] **MCP 서버 25 도구**: `init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · **`interview`** · **`export`** · **`import`** · **`verify`** · **`status`** · **`gc`**
 - [x] persona zod schema + 시스템 프롬프트 자동 렌더링
 - [x] **TF-IDF RAG** (외부 의존성 0 · 키워드 매칭 대비 정확도 ↑) — `knowledge/` + 인터뷰 전사본
 - [x] **SHA-256 hash-chained 감사 로그** + 무결성 검증
@@ -390,13 +390,16 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 - [x] **전체 대시보드** (`afterglow_status`) + **보존/정리** (`afterglow_gc` — 스냅샷 prune · 미디어 purge · 보관함 영구삭제)
 - [x] **전사** (`interview transcribe` — 로컬 whisper `--apply` / Claude polish `--text`) + **회차 전 질문 제안** (`suggest-questions`) + **검토 후 인덱싱** (`review`)
 - [x] **import `--expectAnchor`** (번들 위변조 탐지) + **audit checkpoint/fast** (대용량 증분 검증)
-- [x] vitest 201개 + stdio 핸드셰이크 (24 도구 전체 검증)
+- [x] **BM25 RAG 랭킹** + opt-in **dense-vector 백엔드** (`AFTERGLOW_RAG_BACKEND=dense` · embeddings/ 캐시 · 실패 시 렉시컬 fallback)
+- [x] **whisper 모델 관리** (`transcribe --download/--list-models` + 자동 해석)
+- [x] **Slack 연동** (`afterglow_slack` — test/digest/share, Incoming Webhook)
+- [x] vitest 213개 + stdio 핸드셰이크 (25 도구 전체 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 - [x] **핸즈온 Jupyter 노트북** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — 초보자용 전 기능 따라하기
 
 ### 다음
-- [ ] 미디어 자동 전사 모델 번들 (whisper.cpp WASM lazy-download — 코드 경로는 완비, 모델만 옵트인)
-- [ ] dense-vector RAG · Web companion · Slack 연동
+- [ ] whisper.cpp WASM 엔진 번들 (모델 lazy-download 까지 완전 자동)
+- [ ] per-tool ACL · 정기 retention 자동화 · Web companion
 
 [기여 환영](https://github.com/DaeSeokSong/Afterglow/issues/new) — 이슈 / PR / 사용 사례 모두 좋아요.
 
