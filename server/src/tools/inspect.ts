@@ -5,7 +5,9 @@ import {
   assertInitialized,
   agentDir,
   knowledgeDir,
+  readInterviewIndex,
   readPersona,
+  readProvenance,
 } from '../storage.js';
 import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
@@ -55,6 +57,11 @@ export async function runInspect(args: InspectArgs): Promise<ToolReply> {
     /* ignore */
   }
 
+  // Interviews + provenance — surfaced here so a single `inspect` shows the
+  // agent's full management state (rounds, transfer origin) without extra calls.
+  const interviewIndex = await readInterviewIndex(args.slug);
+  const provenance = await readProvenance(args.slug);
+
   if (args.json) {
     return {
       content: [
@@ -65,6 +72,8 @@ export async function runInspect(args: InspectArgs): Promise<ToolReply> {
               persona,
               status,
               knowledgeFileCount: knowledgeCount,
+              interviews: interviewIndex.sessions,
+              provenance,
               folder: agentDir(args.slug),
             },
             null,
@@ -130,6 +139,30 @@ export async function runInspect(args: InspectArgs): Promise<ToolReply> {
   const safeDeny = persona.mcpDeny.map((m) => sanitisePromptLine(m, 200)).filter((m) => m.length > 0);
   lines.push(`   허용: ${safeAllow.join(', ') || '(없음)'}`);
   if (safeDeny.length > 0) lines.push(`   거부: ${safeDeny.join(', ')}`);
+  lines.push('');
+  lines.push(`   ├─ 인터뷰 ${'─'.repeat(52)}┤`);
+  if (interviewIndex.sessions.length === 0) {
+    lines.push(`   (없음 — /afterglow interview ${persona.slug} --action start …)`);
+  } else {
+    const fin = interviewIndex.sessions.filter((s) => s.status === 'finalized').length;
+    const pend = interviewIndex.sessions.filter((s) => s.status === 'pending-confirmation').length;
+    const open = interviewIndex.sessions.filter((s) => s.status === 'open').length;
+    lines.push(`   회차 ${interviewIndex.sessions.length} (finalized ${fin}${pend ? ` · pending ${pend}` : ''}${open ? ` · open ${open}` : ''})`);
+    for (const s of interviewIndex.sessions.slice(0, 8)) {
+      const mark =
+        s.status === 'finalized' ? '✓' : s.status === 'pending-confirmation' ? '⏳' : s.status === 'aborted' ? '✗' : '·';
+      const kindTag = s.kind === 'annotation' ? ' ⚠annotation' : '';
+      lines.push(`   ${mark} #${s.sessionId}  ${sanitisePromptLine(s.title, 60)}${kindTag}`);
+    }
+  }
+  if (provenance?.imported) {
+    lines.push('');
+    lines.push(`   ├─ 출처 (import) ${'─'.repeat(46)}┤`);
+    lines.push(`   원 서명자: ${sanitisePromptLine(provenance.origin.signer ?? '(미상)', 200)} · 신뢰도: ${provenance.trustLevel}`);
+    if (provenance.importedBy) lines.push(`   받은 사람: ${sanitisePromptLine(provenance.importedBy, 200)}`);
+    const annot = provenance.postImportActivity.filter((a) => a.type === 'annotation').length;
+    if (annot > 0) lines.push(`   ⚠ 인계자 주석 ${annot}건 포함 (본인 미확인)`);
+  }
   lines.push('');
   lines.push(`   ├─ 폴더 ${'─'.repeat(54)}┤`);
   lines.push(`   ${agentDir(persona.slug)}`);
