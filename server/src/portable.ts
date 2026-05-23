@@ -49,10 +49,34 @@ export const BundleManifestSchema = z
     exportedBy: z.string().optional(),
     sourceServerVersion: z.string().optional(),
     includedVersions: z.boolean().default(false),
+    // Anchor hash binding the manifest contents (sender shares it out-of-band;
+    // import --expectAnchor compares to detect a tampered manifest). Optional
+    // for back-compat with pre-anchor bundles.
+    bundleHash: z.string().optional(),
     agents: z.array(BundleAgentSchema).default([]),
   })
   .strict();
 export type BundleManifest = z.infer<typeof BundleManifestSchema>;
+
+/**
+ * Deterministic anchor over the manifest's authenticated content (sorted
+ * slug→folderHash pairs + export metadata), EXCLUDING bundleHash itself.
+ * If an attacker tampers an agent folder AND rewrites its manifest folderHash
+ * to match, this anchor changes — so a sender-communicated expected anchor
+ * detects manifest forgery that the per-agent check alone would miss.
+ */
+export function computeBundleHash(m: BundleManifest): string {
+  const canon = JSON.stringify({
+    version: m.version,
+    exportedAt: m.exportedAt,
+    exportedBy: m.exportedBy ?? null,
+    includedVersions: m.includedVersions,
+    agents: [...m.agents]
+      .sort((a, b) => (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0))
+      .map((a) => ({ slug: a.slug, folderHash: a.folderHash })),
+  });
+  return 'sha256:' + createHash('sha256').update(canon).digest('hex');
+}
 
 /** Folders inside an agent dir that are NEVER bundled (regenerable at rest). */
 export const ALWAYS_EXCLUDE = new Set(['embeddings']);

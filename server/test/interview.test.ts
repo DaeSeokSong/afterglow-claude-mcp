@@ -231,6 +231,37 @@ describe('interview · attach', () => {
     expect(r.isError).toBe(true);
   });
 
+  it('reviewRequired holds the transcript out of RAG until action=review clears it', async () => {
+    await bootstrapAndSign();
+    const { runInterview } = await import('../src/tools/interview.js');
+    const { runAsk } = await import('../src/tools/ask.js');
+    const { agentDir } = await import('../src/storage.js');
+    const sid = await startSession('jiyoon', '검토필요');
+    const media = join(agentDir('jiyoon'), 'screen.mp4');
+    const trans = join(agentDir('jiyoon'), 'screen.txt');
+    await writeFile(media, Buffer.from('VID'));
+    // Distinct token lives ONLY in the transcript; the query uses other words.
+    await writeFile(trans, '민감화면고유토큰 — 대시보드에서 export 버튼으로 내보냅니다.');
+
+    const att = await runInterview({
+      action: 'attach', slug: 'jiyoon', session: sid,
+      file: media, transcript: trans, speakers: ['이지윤'], reviewRequired: true,
+    } as never);
+    expect(att.content[0].text).toMatch(/reviewRequired/);
+    expect(att.content[0].text).toMatch(/인덱싱하지 않/);
+
+    // Held transcript must NOT be retrievable yet (query avoids the token).
+    const before = await runAsk({ slug: 'jiyoon', question: '대시보드 export 어떻게 해요?' } as never);
+    expect(before.content[0].text).not.toContain('민감화면고유토큰');
+
+    // Clear review → transcript promoted to indexed name → now searchable.
+    const rev = await runInterview({ action: 'review', slug: 'jiyoon', session: sid, file: 'screen.mp4' } as never);
+    expect(rev.isError).toBeUndefined();
+    expect(rev.content[0].text).toMatch(/검토 완료/);
+    const after = await runAsk({ slug: 'jiyoon', question: '대시보드 export 어떻게 해요?' } as never);
+    expect(after.content[0].text).toContain('민감화면고유토큰');
+  });
+
   it('enforces a size limit', async () => {
     await bootstrapAndSign();
     const { runInterview } = await import('../src/tools/interview.js');

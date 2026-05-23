@@ -279,6 +279,38 @@ describe('import · integrity + security', () => {
     expect(forced.content[0].text).toContain('broken-chain');
   });
 
+  it('--expectAnchor accepts a matching anchor and rejects a tampered manifest', async () => {
+    await bootstrapAndSign('jiyoon');
+    const { runExport } = await import('../src/tools/export.js');
+    const bundle = bundlePathFrom((await runExport({ slugs: ['jiyoon'] })).content[0].text);
+    const manifestPath = join(bundle, 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    const anchor: string = manifest.bundleHash;
+    expect(anchor).toMatch(/^sha256:/);
+
+    process.env.AFTERGLOW_ROOT = rootB;
+    const { runInit } = await import('../src/tools/init.js');
+    const { runImport } = await import('../src/tools/import.js');
+    await runInit({});
+
+    // Tamper the manifest (swap a folderHash) then import with the ORIGINAL anchor.
+    manifest.agents[0].folderHash = 'sha256:' + '0'.repeat(64);
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+    const tampered = await runImport({ input: bundle, expectAnchor: anchor });
+    expect(tampered.isError).toBe(true);
+    expect(tampered.content[0].text).toMatch(/앵커 불일치|위변조/);
+
+    // A fresh, untampered bundle with its matching anchor imports cleanly.
+    process.env.AFTERGLOW_ROOT = rootA;
+    const freshExport = await runExport({ slugs: ['jiyoon'], output: 'bundle-ok' });
+    process.env.AFTERGLOW_ROOT = rootB;
+    const fresh = bundlePathFrom(freshExport.content[0].text);
+    const okManifest = JSON.parse(await readFile(join(fresh, 'manifest.json'), 'utf8'));
+    const ok = await runImport({ input: fresh, expectAnchor: okManifest.bundleHash });
+    expect(ok.isError).toBeUndefined();
+    expect(ok.content[0].text).toMatch(/✓ 일치/);
+  });
+
   it('flags prompt-injection content during verify/import', async () => {
     const { runInit } = await import('../src/tools/init.js');
     const { runCreate } = await import('../src/tools/create.js');

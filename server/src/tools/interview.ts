@@ -11,7 +11,9 @@ import {
   interviewAttachmentsDir,
   interviewSessionDir,
   readConsentSigners,
+  readCorrections,
   readFollowupConsent,
+  readHistory,
   readInterviewIndex,
   readInterviewSession,
   readPersona,
@@ -27,7 +29,7 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { PersonaSchema, renderSystemPrompt } from '../persona.js';
-import { retrieve } from '../rag.js';
+import { retrieve, loadChunks } from '../rag.js';
 import {
   AnswerSourceSchema,
   deriveSessionId,
@@ -83,7 +85,9 @@ export const interviewShape = {
       'add-question',
       'answer',
       'gap-check',
+      'suggest-questions',
       'attach',
+      'review',
       'annotate',
       'status',
       'list',
@@ -93,7 +97,7 @@ export const interviewShape = {
       'transcribe',
     ])
     .describe(
-      'start | add-question | answer | gap-check | attach | annotate | status | list | inspect | finalize | abort | transcribe.',
+      'start | add-question | answer | gap-check | suggest-questions | attach | review | annotate | status | list | inspect | finalize | abort | transcribe.',
     ),
   slug: z.string().min(1).describe('대상 에이전트 slug.'),
   session: z
@@ -169,7 +173,12 @@ export const interviewShape = {
 
   /* gap-check / transcribe */
   limit: z.number().int().min(1).max(50).optional().describe('gap-check 시 분석 대상 답변 수(기본 5).'),
-  apply: z.boolean().optional().describe('transcribe 시 로컬 STT 실제 실행 시도(기본 false=안내만).'),
+  apply: z.boolean().optional().describe('transcribe 시 로컬 whisper 실제 실행 시도(기본 false=안내만).'),
+  text: z
+    .string()
+    .max(200_000)
+    .optional()
+    .describe('transcribe 시 저장할 전사본 본문 (STT 결과 또는 Claude polish). --file 로 대상 첨부 지정.'),
 } as const;
 
 interface InterviewArgs {
@@ -205,6 +214,7 @@ interface InterviewArgs {
   signPartial?: boolean;
   limit?: number;
   apply?: boolean;
+  text?: string;
 }
 
 /* --------------------------------------------------------------- */
@@ -238,8 +248,12 @@ export async function runInterview(args: InterviewArgs): Promise<ToolReply> {
         return answer(args);
       case 'gap-check':
         return gapCheck(args);
+      case 'suggest-questions':
+        return suggestQuestions(args);
       case 'attach':
         return attach(args);
+      case 'review':
+        return reviewMedia(args);
       case 'annotate':
         return annotate(args);
       case 'status':
@@ -650,6 +664,91 @@ async function gapCheck(args: InterviewArgs): Promise<ToolReply> {
 }
 
 /* --------------------------------------------------------------- */
+/* suggest-questions  (proactive gap analysis BEFORE an interview)  */
+/* --------------------------------------------------------------- */
+
+async function suggestQuestions(args: InterviewArgs): Promise<ToolReply> {
+  const persona = await readPersona(args.slug);
+
+  // Signal A — past asks the persona answered with LOW confidence.
+  const history = await readHistory(args.slug).catch(() => []);
+  const lowConf = history
+    .filter((h) => /low-conf/.test(h.message) && /^ask/.test(h.message))
+    .slice(-15)
+    .map((h) => sanitisePromptLine(h.message, 200));
+
+  // Signal B — areas the user repeatedly corrected.
+  const corrections = (await readCorrections(args.slug).catch(() => []))
+    .slice(-15)
+    .map((c) => `[${c.kind}] ${sanitisePromptLine(c.note, 160)}`);
+
+  // Signal C — knowledge files whose content isn't reflected in persona.bio
+  // (material exists, but the persona never explains it → ripe for interview).
+  const bioTokens = new Set(
+    (persona.bio ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length >= 2),
+  );
+  const chunks = await loadChunks(args.slug).catch(() => []);
+  const fileCoverage = new Map<string, boolean>(); // path → has any token in bio
+  for (const c of chunks) {
+    const toks = c.text.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t.length >= 3);
+    const covered = toks.some((t) => bioTokens.has(t));
+    fileCoverage.set(c.path, fileCoverage.get(c.path) || covered);
+  }
+  const uncovered = [...fileCoverage.entries()]
+    .filter(([, covered]) => !covered)
+    .map(([p]) => shortBase(p))
+    .slice(0, 12);
+
+  // Signal D — questions explicitly declined in prior finalized interviews.
+  const index = await readInterviewIndex(args.slug);
+  const declined: string[] = [];
+  for (const item of index.sessions) {
+    const s = await readInterviewSession(args.slug, item.sessionId);
+    if (!s) continue;
+    for (const q of s.questions) {
+      if (q.status === 'declined') declined.push(sanitisePromptText(q.question, 300).replace(/\n/g, ' '));
+    }
+  }
+
+  await appendHistory(args.slug, `interview suggest-questions (lowConf ${lowConf.length}, corr ${corrections.length}, uncovered ${uncovered.length}, declined ${declined.length})`);
+  await auditAppend({
+    tool: 'afterglow_interview',
+    slug: args.slug,
+    summary: `interview suggest-questions · ${args.slug}`,
+    meta: { lowConf: lowConf.length, corrections: corrections.length, uncovered: uncovered.length, declined: declined.length },
+  });
+
+  const lines: string[] = [];
+  lines.push(`# 인터뷰 질문 제안 컨텍스트  ·  ${persona.slug}`);
+  lines.push('');
+  lines.push('인터뷰 시작 전에, 아래 신호를 근거로 **인터뷰이에게 물어볼 우선 질문 세트**를 만들어 주세요.');
+  lines.push('각 질문에는 어떤 신호에서 나왔는지 근거를 함께 다세요.');
+  lines.push('');
+  lines.push('## 신호 A — 과거 낮은 신뢰도 답변 (페르소나가 약했던 주제)');
+  lines.push(lowConf.length ? lowConf.map((l) => `- ${l}`).join('\n') : '(기록 없음)');
+  lines.push('');
+  lines.push('## 신호 B — 사용자가 반복 보정한 영역 (corrections.log)');
+  lines.push(corrections.length ? corrections.map((c) => `- ${c}`).join('\n') : '(기록 없음)');
+  lines.push('');
+  lines.push('## 신호 C — 자료는 있으나 페르소나 소개에 없는 영역 (자료-설명 갭)');
+  lines.push(uncovered.length ? uncovered.map((u) => `- ${u}`).join('\n') : '(갭 없음 — 자료가 모두 소개에 반영됨)');
+  lines.push('');
+  lines.push('## 신호 D — 이전 회차에서 답하지 않기로 한 질문 (재확인 후보)');
+  lines.push(declined.length ? declined.map((d) => `- ${d}`).join('\n') : '(없음)');
+  lines.push('');
+  lines.push('## Claude 에게');
+  lines.push('위 신호별로 1개 이상, 총 5–10개의 우선 질문을 만들어 제시하세요. 채택한 질문은:');
+  lines.push(`  /afterglow interview ${args.slug} --action start --title "..." --interviewer "..." 후`);
+  lines.push(`  --action add-question --session <id> --question "..." 로 회차에 추가하세요.`);
+  return { content: [{ type: 'text', text: lines.join('\n') }] };
+}
+
+function shortBase(p: string): string {
+  const parts = p.replace(/\\/g, '/').split('/');
+  return parts.slice(-2).join('/');
+}
+
+/* --------------------------------------------------------------- */
 /* attach  (P4 — media)                                            */
 /* --------------------------------------------------------------- */
 
@@ -688,7 +787,12 @@ async function attach(args: InterviewArgs): Promise<ToolReply> {
   const destName = safeBasename(args.file);
   await fs.writeFile(resolve(attachDir, destName), buf);
 
-  // Optional transcript pairing → RAG-indexable .md next to the original.
+  const reviewRequired = !!args.reviewRequired;
+
+  // Optional transcript pairing. When reviewRequired, the transcript is written
+  // with a NON-indexed extension (`.transcript.pending`) so RAG/ask will NOT
+  // surface it until a human clears it via action=review — honouring the
+  // "don't cite until reviewed" promise (e.g. video may show tokens/PII).
   let transcriptFile: string | undefined;
   let transcriptStatus: Attachment['transcriptStatus'] = 'none';
   if (args.transcript) {
@@ -700,7 +804,7 @@ async function attach(args: InterviewArgs): Promise<ToolReply> {
     } catch (e) {
       return errorReply(`전사본을 읽을 수 없습니다: ${sanitisePromptLine((e as Error).message, 300)}`);
     }
-    const tName = `${destName}.transcript.md`;
+    const tName = reviewRequired ? `${destName}.transcript.pending` : `${destName}.transcript.md`;
     // Sanitise transcript text so it can't forge headers when RAG-surfaced.
     await fs.writeFile(resolve(attachDir, tName), sanitisePromptText(tRaw, 200_000), 'utf8');
     transcriptFile = tName;
@@ -717,7 +821,7 @@ async function attach(args: InterviewArgs): Promise<ToolReply> {
     consentScope: args.consentScope ? sanitisePromptLine(args.consentScope, 1_000) : undefined,
     transcriptFile,
     transcriptStatus,
-    reviewRequired: !!args.reviewRequired,
+    reviewRequired,
     chapters: (args.chapters ?? []).slice(0, 200).map((c) => ({
       at: sanitisePromptLine(c.at, 20),
       label: sanitisePromptLine(c.label, 200),
@@ -744,7 +848,10 @@ async function attach(args: InterviewArgs): Promise<ToolReply> {
     `  발화자: ${speakers.length > 0 ? speakers.join(', ') : '(없음)'}`,
     `  전사본: ${transcriptStatus}${transcriptFile ? ` (${transcriptFile} — RAG 인덱싱됨)` : ''}`,
   ];
-  if (att.reviewRequired) lines.push('  ⚠ reviewRequired — 사람이 검토 전엔 ask 인용 금지로 표기됩니다.');
+  if (att.reviewRequired) {
+    lines.push('  ⚠ reviewRequired — 전사본을 RAG 에 인덱싱하지 않았습니다 (ask 가 인용하지 않음).');
+    lines.push(`     검토 후 승인: action=review --session ${session.sessionId} --file ${destName}`);
+  }
   if (transcriptStatus === 'none') {
     lines.push('');
     lines.push('전사본이 없습니다. 옵션:');
@@ -752,6 +859,65 @@ async function attach(args: InterviewArgs): Promise<ToolReply> {
     lines.push(`  · action=transcribe --session ${session.sessionId} — 로컬 whisper 안내 / Claude polish`);
   }
   return { content: [{ type: 'text', text: lines.join('\n') }] };
+}
+
+/* --------------------------------------------------------------- */
+/* review  (clear reviewRequired hold → index the transcript)      */
+/* --------------------------------------------------------------- */
+
+async function reviewMedia(args: InterviewArgs): Promise<ToolReply> {
+  const loaded = await loadSession(args.slug, args.session);
+  if ('error' in loaded) return errorReply(loaded.error);
+  const session = loaded;
+  if (session.status === 'aborted') return errorReply(`회차 #${session.sessionId} 는 aborted 입니다.`);
+
+  const pending = session.attachments.filter((a) => a.reviewRequired);
+  if (pending.length === 0) return errorReply(`검토 대기중인 첨부가 없습니다 (#${session.sessionId}).`);
+
+  let target: Attachment | undefined;
+  if (args.file) {
+    const want = safeBasename(args.file);
+    target = session.attachments.find((a) => a.file === want || a.file === args.file);
+  } else if (pending.length === 1) {
+    target = pending[0];
+  } else {
+    return errorReply(`검토 대기 첨부가 여러 개입니다. --file 로 지정하세요: ${pending.map((a) => a.file).join(', ')}`);
+  }
+  if (!target) return errorReply(`첨부를 찾을 수 없습니다: ${sanitisePromptLine(args.file ?? '', 200)}`);
+  if (!target.reviewRequired) return errorReply(`${sanitisePromptLine(target.file, 200)} 는 이미 검토 완료 상태입니다.`);
+
+  // Promote the held transcript (`.transcript.pending`) to an indexed `.md`.
+  if (target.transcriptFile && target.transcriptFile.endsWith('.pending')) {
+    const attachDir = interviewAttachmentsDir(args.slug, session.sessionId);
+    const toName = target.transcriptFile.replace(/\.pending$/, '.md');
+    try {
+      await fs.rename(resolve(attachDir, target.transcriptFile), resolve(attachDir, toName));
+      target.transcriptFile = toName;
+    } catch (e) {
+      return errorReply(`전사본 승격 실패: ${sanitisePromptLine((e as Error).message, 200)}`);
+    }
+  }
+  target.reviewRequired = false;
+  await writeInterviewSession(args.slug, session);
+  await appendHistory(args.slug, `interview review #${session.sessionId} ${target.file} cleared`);
+  await auditAppend({
+    tool: 'afterglow_interview',
+    slug: args.slug,
+    summary: `interview review · ${session.sessionId} · ${target.file}`,
+    meta: { sessionId: session.sessionId, file: target.file },
+  });
+  return {
+    content: [
+      {
+        type: 'text',
+        text:
+          `✓ ${sanitisePromptLine(target.file, 200)} 검토 완료 (#${session.sessionId}).` +
+          (target.transcriptFile?.endsWith('.md')
+            ? ' 전사본이 이제 RAG 에 인덱싱되어 ask 가 인용할 수 있습니다.'
+            : ' (전사본 없음 — 보류 해제만 적용.)'),
+      },
+    ],
+  };
 }
 
 /* --------------------------------------------------------------- */
@@ -1045,9 +1211,71 @@ async function transcribe(args: InterviewArgs): Promise<ToolReply> {
   if (session.attachments.length === 0) {
     return errorReply(`회차 #${session.sessionId} 에 첨부가 없습니다. 먼저 action=attach.`);
   }
+
+  // ── Mode 1: save provided transcript text (Claude polish / external STT) ──
+  if (args.text !== undefined) {
+    const target = pickAttachment(session, args.file);
+    if (!target) return errorReply(`대상 첨부를 찾을 수 없습니다. --file <파일명> 으로 지정하세요: ${session.attachments.map((a) => a.file).join(', ')}`);
+    const attachDir = interviewAttachmentsDir(args.slug, session.sessionId);
+    await fs.mkdir(attachDir, { recursive: true });
+    // Held (reviewRequired & not yet cleared) → keep out of RAG via .pending.
+    const indexed = !target.reviewRequired;
+    const tName = `${target.file}.transcript.${indexed ? 'md' : 'pending'}`;
+    // Remove a previous transcript file if its name differs (avoid orphans).
+    if (target.transcriptFile && target.transcriptFile !== tName) {
+      await fs.rm(resolve(attachDir, target.transcriptFile), { force: true }).catch(() => {});
+    }
+    await fs.writeFile(resolve(attachDir, tName), sanitisePromptText(args.text, 200_000), 'utf8');
+    target.transcriptFile = tName;
+    target.transcriptStatus = 'polished';
+    await writeInterviewSession(args.slug, session);
+    await appendHistory(args.slug, `interview transcribe(save) #${session.sessionId} ${target.file} (${args.text.length} chars)`);
+    await auditAppend({
+      tool: 'afterglow_interview',
+      slug: args.slug,
+      summary: `interview transcribe save · ${session.sessionId} · ${target.file}`,
+      meta: { sessionId: session.sessionId, file: target.file, chars: args.text.length, indexed },
+    });
+    return {
+      content: [
+        {
+          type: 'text',
+          text:
+            `✓ 전사본 저장: ${target.file} → ${tName} (${args.text.length}자, status=polished).` +
+            (indexed ? ' RAG 에 인덱싱되어 ask 가 인용합니다.' : ' reviewRequired 보류 중 — action=review 로 승인하면 인덱싱됩니다.'),
+        },
+      ],
+    };
+  }
+
   // Detect a native whisper binary on PATH (best-effort, never throws).
   const nativeWhisper = await detectWhisper();
 
+  // ── Mode 2: --apply → run local whisper on a media attachment ──
+  if (args.apply) {
+    const model = process.env.AFTERGLOW_WHISPER_MODEL;
+    const target = pickAttachment(session, args.file, true);
+    if (!nativeWhisper || !model) {
+      return errorReply(
+        `로컬 자동 전사를 실행할 수 없습니다 (whisper=${nativeWhisper ?? '없음'}, model env AFTERGLOW_WHISPER_MODEL=${model ? '설정됨' : '미설정'}). ` +
+          `whisper.cpp 설치 + AFTERGLOW_WHISPER_MODEL=<ggml-*.bin> 설정 후 재시도하거나, 직접 전사 후 --text 로 저장하세요.`,
+      );
+    }
+    if (!target) return errorReply('전사할 오디오/비디오 첨부를 찾지 못했습니다 (--file 로 지정).');
+    const r = await runLocalWhisper(args.slug, session.sessionId, target, nativeWhisper, model);
+    if ('error' in r) return errorReply(r.error);
+    await writeInterviewSession(args.slug, session);
+    await appendHistory(args.slug, `interview transcribe(apply) #${session.sessionId} ${target.file} via ${nativeWhisper}`);
+    await auditAppend({
+      tool: 'afterglow_interview',
+      slug: args.slug,
+      summary: `interview transcribe apply · ${session.sessionId} · ${target.file}`,
+      meta: { sessionId: session.sessionId, file: target.file, engine: nativeWhisper },
+    });
+    return { content: [{ type: 'text', text: `✦ 로컬 whisper 전사 완료: ${target.file} → ${r.transcriptFile}. Claude polish 를 원하면 transcribe(info) 안내를 참고하세요.` }] };
+  }
+
+  // ── Mode 0: info / guidance ──
   const lines: string[] = [];
   lines.push(`# 전사 안내 · 인터뷰 #${session.sessionId}`);
   lines.push('');
@@ -1062,23 +1290,79 @@ async function transcribe(args: InterviewArgs): Promise<ToolReply> {
     lines.push(`  · ${a.file} (${a.kind}) — 전사 상태: ${a.transcriptStatus}`);
   }
   lines.push('');
-  if (nativeWhisper && args.apply) {
-    lines.push(
-      `로컬 whisper(${nativeWhisper}) 가 감지됐습니다. 자동 전사를 실행하려면 사용자가 직접:`,
-    );
-    lines.push(`  ${nativeWhisper} -m <model.bin> -f "<파일경로>" -otxt`);
-    lines.push(`  그 후 결과 .txt 를 attach --transcript 로 다시 첨부하세요.`);
-    lines.push('  (코어 패키지는 의존성 0 원칙상 whisper 모델을 자동 다운로드/실행하지 않습니다.)');
+  lines.push('## 자동 전사 (로컬 whisper)');
+  if (nativeWhisper) {
+    lines.push(`  whisper 감지됨: ${nativeWhisper}. 모델 경로를 env 로 지정 후 실행:`);
+    lines.push('    AFTERGLOW_WHISPER_MODEL=<ggml-base.bin> …');
+    lines.push(`    /afterglow interview ${args.slug} --action transcribe --session ${session.sessionId} --apply --file <첨부>`);
   } else {
-    lines.push('권장: 짧은 음성은 직접 전사가 가장 빠릅니다. 긴 인터뷰는 로컬 whisper 설치 후 첨부.');
+    lines.push('  whisper 미감지. whisper.cpp 설치 후 위 --apply 사용, 또는 직접 전사 후 --text 저장.');
   }
+  lines.push('  (코어 패키지는 의존성 0 원칙상 whisper 모델을 자동 다운로드하지 않습니다 — 옵트인.)');
   lines.push('');
-  lines.push('## Claude polish 요청 (전사본이 있을 때)');
-  lines.push('이미 transcriptStatus=user-provided/auto-done 인 첨부가 있으면, 그 .md 를 읽어');
-  lines.push('발화자 라벨 정리·오탈자 교정·5분 단위 챕터 요약을 수행한 뒤 같은 파일에 덮어쓰면 됩니다.');
+  lines.push('## Claude polish 저장 (전사본 다듬기 → 저장)');
+  lines.push('Claude 가 기존 전사본/STT 결과를 발화자 정리·오탈자 교정·챕터 요약으로 다듬은 뒤 저장:');
+  lines.push(`  /afterglow interview ${args.slug} --action transcribe --session ${session.sessionId} --file <첨부> --text "<다듬은 전사본>"`);
+  lines.push('  → status=polished, RAG 인덱싱(미검토 보류 시 review 후 인덱싱).');
 
   await appendHistory(args.slug, `interview transcribe(info) #${session.sessionId} (whisper=${nativeWhisper ?? 'none'})`);
   return { content: [{ type: 'text', text: lines.join('\n') }] };
+}
+
+function pickAttachment(
+  session: InterviewSession,
+  file?: string,
+  mediaOnly = false,
+): Attachment | undefined {
+  const pool = mediaOnly
+    ? session.attachments.filter((a) => a.kind === 'audio' || a.kind === 'video')
+    : session.attachments;
+  if (file) {
+    const want = safeBasename(file);
+    return pool.find((a) => a.file === want || a.file === file);
+  }
+  return pool.length === 1 ? pool[0] : pool[pool.length - 1];
+}
+
+/**
+ * Run a local whisper binary on an attachment's media → write the transcript.
+ * Best-effort: never throws (returns {error}); not exercised in CI since no
+ * whisper binary ships. Honours reviewRequired (writes a held `.pending`).
+ */
+async function runLocalWhisper(
+  slug: string,
+  sessionId: string,
+  target: Attachment,
+  bin: string,
+  model: string,
+): Promise<{ transcriptFile: string } | { error: string }> {
+  const { spawn } = await import('node:child_process');
+  const attachDir = interviewAttachmentsDir(slug, sessionId);
+  const mediaPath = resolve(attachDir, target.file);
+  const outPrefix = resolve(attachDir, `${target.file}.whisper`);
+  const code = await new Promise<number>((res) => {
+    try {
+      const p = spawn(bin, ['-m', model, '-f', mediaPath, '-otxt', '-of', outPrefix], { stdio: 'ignore' });
+      p.on('error', () => res(-1));
+      p.on('close', (c) => res(c ?? -1));
+    } catch {
+      res(-1);
+    }
+  });
+  if (code !== 0) return { error: `whisper 실행 실패 (exit ${code}).` };
+  let raw: string;
+  try {
+    raw = await fs.readFile(`${outPrefix}.txt`, 'utf8');
+  } catch {
+    return { error: 'whisper 출력(.txt)을 읽지 못했습니다.' };
+  }
+  const indexed = !target.reviewRequired;
+  const tName = `${target.file}.transcript.${indexed ? 'md' : 'pending'}`;
+  await fs.writeFile(resolve(attachDir, tName), sanitisePromptText(raw, 200_000), 'utf8');
+  await fs.rm(`${outPrefix}.txt`, { force: true }).catch(() => {});
+  target.transcriptFile = tName;
+  target.transcriptStatus = 'auto-done';
+  return { transcriptFile: tName };
 }
 
 async function detectWhisper(): Promise<string | null> {

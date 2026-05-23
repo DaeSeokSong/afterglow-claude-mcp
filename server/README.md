@@ -23,7 +23,7 @@
 <p>
   <a href="#-한-줄-설치"><b>한 줄 설치</b></a> ·
   <a href="#-동작-원리">동작 원리</a> ·
-  <a href="#-도구-22개">도구 22개</a> ·
+  <a href="#-도구-24개">도구 24개</a> ·
   <a href="#-추가-인터뷰--미디어-첨부">추가 인터뷰</a> ·
   <a href="#-핫플러그--exportimport">핫플러그</a> ·
   <a href="#-폴더-구조">폴더 구조</a> ·
@@ -98,7 +98,7 @@ sequenceDiagram
 
 **핵심**: `afterglow_ask`는 LLM을 호출하지 않습니다. 페르소나와 검색 결과를 구조화된 텍스트로 묶어 반환하고, Claude Code 가 자기 컨텍스트로 직접 답변을 생성합니다. → 추가 모델 / GPU / 임베딩 API 0원.
 
-## 🛠 도구 22개
+## 🛠 도구 24개
 
 > v0.2.0 에서 **`interview` · `export` · `import` · `verify`** 4개가 추가됐습니다 (18 → 22). 다중 인터뷰는 [추가 인터뷰 + 미디어 첨부](#-추가-인터뷰--미디어-첨부), 에이전트 이식은 [핫플러그](#-핫플러그--exportimport) 절을 보세요.
 
@@ -223,8 +223,20 @@ sequenceDiagram
       <td><code>/afterglow verify &lt;path&gt;</code></td>
       <td>import 전 <b>읽기 전용</b> 사전 검증. 스키마·서명·무결성·심볼릭링크·인젝션 의심을 체크리스트로 보여주되 로컬 저장소는 건드리지 않음.</td>
     </tr>
+    <tr>
+      <td><code>afterglow_status</code> <sub>v0.3</sub></td>
+      <td><code>/afterglow status</code></td>
+      <td><b>전체 대시보드.</b> 모든 에이전트의 상태·인터뷰 회차(완료/대기)·검토 대기 미디어·import 출처/신뢰도를 한 번에. 개별 <code>inspect</code> 보완. <code>--json</code>.</td>
+    </tr>
+    <tr>
+      <td><code>afterglow_gc</code> <sub>v0.3</sub></td>
+      <td><code>/afterglow gc --action list|prune-versions|purge-media|purge-archive [--apply]</code></td>
+      <td><b>보존/정리(retention).</b> 오래된 persona 스냅샷 정리(태그 보존) · 인터뷰 미디어 원본 삭제(전사본 유지·GDPR) · 보관함 영구 삭제. 기본 <b>dry-run</b>, <code>--apply</code> 로 실제 삭제.</td>
+    </tr>
   </tbody>
 </table>
+
+> v0.3 에서 <code>interview</code> 에 <b>suggest-questions</b>(회차 전 질문 제안) · <b>transcribe</b>(<code>--text</code> 폴리시 저장 / <code>--apply</code> 로컬 whisper) · <b>review</b>(검토 후 인덱싱) 액션이, <code>import</code> 에 <b>--expectAnchor</b>(번들 위변조 탐지), <code>audit</code> 에 <b>--checkpoint/--fast</b>(대용량 증분 검증)가 추가됐습니다.
 
 <details>
 <summary><b>입력 스키마 자세히 보기</b></summary>
@@ -383,8 +395,8 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (184 tests — storage 12 + tools 29 + phase4 33 + phase6 71 + interview 23 + portable 16)
-npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (22 도구 모두 happy-path + 인터뷰/핫플러그 라운드트립 + 체인 검증)
+npm test                   # vitest (201 tests — +integration 6 +v03 9, etc.)
+npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (24 도구 모두 happy-path + v0.3 기능 라운드트립)
 npm run test:all           # 전체 (unit → build → stdio)
 ```
 
@@ -431,7 +443,7 @@ server/
 │  ├─ phase6.test.ts    ← vitest (71 tests — handoff / version / access / correct + P0 보안 회귀)
 │  ├─ interview.test.ts ← vitest (23 tests — 인터뷰 전 흐름 + 갭/첨부/주석/이중서명 + 보안)
 │  ├─ portable.test.ts  ← vitest (16 tests — export/import/verify 라운드트립 + 변조/인젝션/충돌)
-│  └─ stdio.smoke.mjs   ← 실제 MCP stdio 핸드셰이크 (22 도구 + 인터뷰/핫플러그 라운드트립)
+│  └─ stdio.smoke.mjs   ← 실제 MCP stdio 핸드셰이크 (24 도구 + v0.3 라운드트립)
 ├─ tsconfig.json
 ├─ vitest.config.ts
 └─ package.json
@@ -468,7 +480,7 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 
 ## 🗺 Roadmap
 
-- [x] 22 도구 전부 출시: init · create · handoff · sign · resume · list · inspect · ask · edit · council · council_summary · history · audit · recalibrate · correct · archive · version · access · **interview · export · import · verify**
+- [x] 24 도구 전부 출시: …18개… · interview · export · import · verify · **status · gc**
 - [x] zod 스키마 + 시스템 프롬프트 자동 렌더링
 - [x] TF-IDF RAG (오프라인 · 외부 의존성 0) — `knowledge/` + 인터뷰 전사본
 - [x] SHA-256 hash-chained 감사 로그 + 무결성 검증
@@ -478,10 +490,12 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 - [x] **Council moderator** — 강화된 합의 감지 + `afterglow_council_summary` 자동 요약
 - [x] **다중 인터뷰 + 갭 자동 감지 + 음성·영상 첨부** (`afterglow_interview`)
 - [x] **핫플러그** — 다중 에이전트 export/import + 무결성·인젝션 검증 + provenance (`afterglow_export · import · verify`)
-- [x] vitest 184개 + 22 도구 stdio 핸드셰이크
-- [ ] 미디어 자동 전사 Tier 1/2 (로컬 whisper.cpp 번들 / 외부 STT 옵트인)
-- [ ] Web companion: 공유 가능한 read-only "afterglow 페이지"
-- [ ] Slack 연동
+- [x] **전체 대시보드 `afterglow_status`** + **보존/정리 `afterglow_gc`**(스냅샷 prune·미디어 purge·보관함 삭제)
+- [x] **전사 `transcribe`**(로컬 whisper `--apply` / Claude polish `--text`) + **suggest-questions**(회차 전 질문 제안) + **review**(검토 후 인덱싱)
+- [x] **import `--expectAnchor`**(번들 위변조 탐지) + **audit checkpoint**(대용량 증분 검증)
+- [x] vitest 201개 + 24 도구 stdio 핸드셰이크
+- [ ] 미디어 자동 전사 모델 번들 (whisper.cpp WASM lazy-download)
+- [ ] dense-vector RAG · Web companion · Slack 연동
 
 [기여 환영](https://github.com/DaeSeokSong/Afterglow/issues/new) — 이슈 / PR / 사용 사례 모두 좋아요.
 

@@ -9,11 +9,11 @@ import {
   readRegistry,
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
-import { ALWAYS_EXCLUDE, hashFolder, type BundleAgent, type BundleManifest } from '../portable.js';
+import { ALWAYS_EXCLUDE, computeBundleHash, hashFolder, type BundleAgent, type BundleManifest } from '../portable.js';
 import { sanitisePromptLine } from '../sanitize.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
-const SERVER_VERSION = '0.2.0';
+const SERVER_VERSION = '0.3.0';
 
 export const exportShape = {
   slugs: z
@@ -130,6 +130,7 @@ export async function runExport(args: ExportArgs): Promise<ToolReply> {
       includedVersions: !!args.includeVersions,
       agents: manifestAgents,
     };
+    manifest.bundleHash = computeBundleHash(manifest);
     await fs.writeFile(join(outResolved, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
 
     await auditAppend({
@@ -153,8 +154,12 @@ export async function runExport(args: ExportArgs): Promise<ToolReply> {
     lines.push(`       또는 OS 파일탐색기에서 폴더 zip.`);
     lines.push(`    2) 폴더 자체를 USB / 공유 드라이브로 복사.`);
     lines.push('');
+    lines.push(`  번들 앵커 해시: ${manifest.bundleHash}`);
+    lines.push('    ↳ 이 해시를 받는 사람에게 별도 채널(메신저·구두)로 전달하세요. 받는 사람이');
+    lines.push('      /afterglow import … --expectAnchor <해시> 로 매니페스트 위변조를 검증합니다.');
+    lines.push('');
     lines.push('  받는 사람은:');
-    lines.push(`    (압축이면 먼저 풀고) /afterglow import <폴더경로>`);
+    lines.push(`    (압축이면 먼저 풀고) /afterglow import <폴더경로> --expectAnchor ${manifest.bundleHash}`);
     lines.push(`    검증만: /afterglow verify <폴더경로>`);
     return { content: [{ type: 'text', text: lines.join('\n') }] };
   });

@@ -26,7 +26,7 @@
  *   - afterglow_archive          (/afterglow archive <slug> --action archive|restore|list)
  *   - afterglow_version          (/afterglow version <slug> --action list|diff|rollback|tag|snapshot)
  *   - afterglow_access           (/afterglow access <slug> --action list|allow|deny|set-default|check)
- *   - afterglow_interview        (/afterglow interview <slug> --action start|add-question|answer|gap-check|attach|annotate|status|list|inspect|finalize|abort|transcribe)
+ *   - afterglow_interview        (/afterglow interview <slug> --action start|add-question|answer|gap-check|attach|review|annotate|status|list|inspect|finalize|abort|transcribe)
  *   - afterglow_export           (/afterglow export --slugs … | --all)
  *   - afterglow_import           (/afterglow import <path> [--as | --merge | --dryRun])
  *   - afterglow_verify           (/afterglow verify <path>)
@@ -59,9 +59,11 @@ import { interviewShape, runInterview } from './tools/interview.js';
 import { exportShape, runExport } from './tools/export.js';
 import { importShape, runImport } from './tools/import.js';
 import { verifyShape, runVerify } from './tools/verify.js';
+import { statusShape, runStatus } from './tools/status.js';
+import { gcShape, runGc } from './tools/gc.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.2.0';
+const SERVER_VERSION = '0.3.0';
 
 export function buildServer(): McpServer {
   const server = new McpServer(
@@ -283,7 +285,7 @@ export function buildServer(): McpServer {
       title: 'Afterglow — 다중 인터뷰 (인계자 주도)',
       description:
         '인계자(인터뷰어)가 퇴사자(인터뷰이)를 여러 회차에 걸쳐 인터뷰합니다. handoff(본인 1회 셀프검수)와 달리 회차 무제한 — 빠진 부분을 메웁니다. ' +
-        'action=start | add-question | answer | gap-check(빠진 부분 자동 감지) | attach(음성·영상) | annotate(부재 시 주석) | status | list | inspect | finalize(이중 서명) | abort | transcribe. ' +
+        'action=start | add-question | answer | gap-check(빠진 부분 자동 감지) | attach(음성·영상) | review(검토 후 인덱싱) | annotate(부재 시 주석) | status | list | inspect | finalize(이중 서명) | abort | transcribe. ' +
         'gap-check 는 LLM 을 호출하지 않고 컨텍스트를 묶어 반환 — Claude 가 후속 질문을 생성합니다.',
       inputSchema: interviewShape,
     },
@@ -321,6 +323,28 @@ export function buildServer(): McpServer {
       inputSchema: verifyShape,
     },
     wrap(runVerify),
+  );
+
+  server.registerTool(
+    'afterglow_status',
+    {
+      title: 'Afterglow — 전체 대시보드',
+      description:
+        '모든 에이전트의 상태·인터뷰 회차(완료/대기)·검토대기 미디어·import 출처/신뢰도를 한 번에 보여주는 운영 대시보드. 개별 inspect 보완. --json 지원.',
+      inputSchema: statusShape,
+    },
+    wrap(runStatus),
+  );
+
+  server.registerTool(
+    'afterglow_gc',
+    {
+      title: 'Afterglow — 보존/정리 (retention)',
+      description:
+        '오래된 persona 스냅샷 정리(태그 보존), 인터뷰 미디어 원본 삭제(전사본 유지·GDPR), 보관함 영구 삭제. action=list|prune-versions|purge-media|purge-archive. 기본 dry-run, --apply 로 실제 삭제.',
+      inputSchema: gcShape,
+    },
+    wrap(runGc),
   );
 
   return server;
