@@ -7,6 +7,7 @@ import {
   appendHistory,
   assertInitialized,
   assertWritable,
+  consentPath,
   deleteHandoff,
   getStatus,
   handoffPath,
@@ -14,6 +15,7 @@ import {
   readPersona,
   signConsent,
   snapshotPersona,
+  writeFollowupConsent,
   writeHandoff,
   writePersona,
   writeSystemPrompt,
@@ -80,6 +82,21 @@ export const handoffShape = {
     .boolean()
     .optional()
     .describe('finalize 시 pending 질문이 남아도 서명 강행 (--sign-partial).'),
+
+  /* finalize — 추가 인터뷰 사전 동의 (handoff → interview 브릿지) */
+  allowFollowupInterview: z
+    .boolean()
+    .optional()
+    .describe('finalize 시 퇴사 후 인계자의 대면 추가 인터뷰를 본인이 사전 허용.'),
+  allowProxyAnnotation: z
+    .boolean()
+    .optional()
+    .describe('finalize 시 본인 부재 상황에서 인계자 주석(annotation)을 사전 허용.'),
+  followupScope: z
+    .string()
+    .max(2_000)
+    .optional()
+    .describe('finalize 시 추가 인터뷰 허용 범위/제한 (예: "결제·온보딩 한정, 인사평가 거부").'),
 } as const;
 
 interface HandoffArgs {
@@ -91,6 +108,9 @@ interface HandoffArgs {
   reviews?: { id: string; action: 'keep' | 'edit' | 'decline'; userAnswer?: string }[];
   signer?: string;
   signPartial?: boolean;
+  allowFollowupInterview?: boolean;
+  allowProxyAnnotation?: boolean;
+  followupScope?: string;
 }
 
 /* --------------------------------------------------------------- */
@@ -467,6 +487,34 @@ async function finalize(args: HandoffArgs): Promise<ToolReply> {
   const r = await signConsent(args.slug, args.signer, 'handoff (self-review) · 본인 서명 완료');
   await snapshotPersona(args.slug, 'handoff finalize (post)');
 
+  // Future-interview pre-authorisation (handoff → interview bridge). Recorded
+  // machine-readably (followup.json, read by `interview start`) AND as a
+  // human-readable consent.md block. Only written when the signer opts in.
+  let followupNote = '';
+  if (args.allowFollowupInterview || args.allowProxyAnnotation || args.followupScope) {
+    await writeFollowupConsent(args.slug, {
+      allowFollowupInterview: !!args.allowFollowupInterview,
+      allowProxyAnnotation: !!args.allowProxyAnnotation,
+      scope: args.followupScope,
+      signedBy: r.signer,
+      signedAt: session.finalizedAt ?? new Date().toISOString(),
+    });
+    const fcBlock =
+      `\n## 추가 인터뷰 사전 동의 (${r.signer})\n\n` +
+      `- 본인 대면 추가 인터뷰: ${args.allowFollowupInterview ? '허용' : '미허용'}\n` +
+      `- 부재 시 인계자 주석: ${args.allowProxyAnnotation ? '허용' : '미허용'}\n` +
+      (args.followupScope ? `- 범위 제한: ${sanitisePromptLine(args.followupScope, 500)}\n` : '');
+    try {
+      await fs.appendFile(consentPath(args.slug), fcBlock, 'utf8');
+    } catch {
+      /* consent.md append is best-effort; followup.json is the source of truth */
+    }
+    followupNote =
+      `\n  추가 인터뷰 사전 동의: 대면 ${args.allowFollowupInterview ? '허용' : '미허용'} · ` +
+      `부재주석 ${args.allowProxyAnnotation ? '허용' : '미허용'}` +
+      (args.followupScope ? ` · 범위="${sanitisePromptLine(args.followupScope, 80)}"` : '');
+  }
+
   session.finalizedAt = new Date().toISOString();
   // r.signer is the sanitised value from signConsent — args.signer is raw.
   // Both handoff.json and the audit/history records should hold the clean
@@ -492,7 +540,8 @@ async function finalize(args: HandoffArgs): Promise<ToolReply> {
           `  서명자:  ${sanitisePromptLine(r.signer, 200)}\n` +
           `  시각:    ${session.finalizedAt}\n` +
           `  통계:    kept ${tally.kept} · edited ${tally.edited} · declined ${tally.declined}` +
-          (tally.pending > 0 ? ` · pending ${tally.pending} (--sign-partial)` : '') + '\n\n' +
+          (tally.pending > 0 ? ` · pending ${tally.pending} (--sign-partial)` : '') +
+          followupNote + '\n\n' +
           `이제 호출 가능: claude /afterglow ask ${args.slug} "..."`,
       },
     ],

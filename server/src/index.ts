@@ -7,7 +7,7 @@
  *
  *   claude mcp add afterglow npx @daeseoksong/afterglow-mcp
  *
- * The server exposes 18 tools that mirror the slash commands in the design:
+ * The server exposes 22 tools that mirror the slash commands in the design:
  *   - afterglow_init             (/afterglow init)
  *   - afterglow_create           (/afterglow create <slug> …)
  *   - afterglow_list             (/afterglow list)
@@ -26,9 +26,13 @@
  *   - afterglow_archive          (/afterglow archive <slug> --action archive|restore|list)
  *   - afterglow_version          (/afterglow version <slug> --action list|diff|rollback|tag|snapshot)
  *   - afterglow_access           (/afterglow access <slug> --action list|allow|deny|set-default|check)
+ *   - afterglow_interview        (/afterglow interview <slug> --action start|add-question|answer|gap-check|attach|annotate|status|list|inspect|finalize|abort|transcribe)
+ *   - afterglow_export           (/afterglow export --slugs … | --all)
+ *   - afterglow_import           (/afterglow import <path> [--as | --merge | --dryRun])
+ *   - afterglow_verify           (/afterglow verify <path>)
  *
- * `ask` and `council` do NOT call an LLM. They return persona + RAG context
- * so Claude in the user's session can compose the actual answer.
+ * `ask`, `council` and `interview gap-check` do NOT call an LLM. They return
+ * persona + RAG context so Claude in the user's session composes the answer.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -51,9 +55,13 @@ import { handoffShape, runHandoff } from './tools/handoff.js';
 import { versionShape, runVersion } from './tools/version.js';
 import { accessShape, runAccess } from './tools/access.js';
 import { correctShape, runCorrect } from './tools/correct.js';
+import { interviewShape, runInterview } from './tools/interview.js';
+import { exportShape, runExport } from './tools/export.js';
+import { importShape, runImport } from './tools/import.js';
+import { verifyShape, runVerify } from './tools/verify.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.1.3';
+const SERVER_VERSION = '0.2.0';
 
 export function buildServer(): McpServer {
   const server = new McpServer(
@@ -65,8 +73,9 @@ export function buildServer(): McpServer {
       instructions:
         '퇴사자 에이전트 폴더(~/.claude/afterglow/)를 관리하는 MCP 서버. ' +
         'init → create → handoff(본인 인계 검수) → sign → list → inspect → ask, ' +
-        '그리고 edit / resume / council / council_summary / history / audit / recalibrate / correct / archive / version / access 까지 ' +
-        '18 개 도구로 한 사람의 폴더 단위로 페르소나·자료·권한·감사·보관·버전·본인 검수를 다룹니다.',
+        '그리고 edit / resume / council / council_summary / history / audit / recalibrate / correct / archive / version / access, ' +
+        '추가로 interview(인계자 주도 다중 인터뷰 + 갭 감지 + 음성·영상) / export / import / verify(핫플러그) 까지 ' +
+        '22 개 도구로 한 사람의 폴더 단위로 페르소나·자료·권한·감사·보관·버전·본인 검수·추가 인터뷰·이식을 다룹니다.',
     },
   );
 
@@ -266,6 +275,52 @@ export function buildServer(): McpServer {
       inputSchema: councilSummaryShape,
     },
     wrap(runCouncilSummary),
+  );
+
+  server.registerTool(
+    'afterglow_interview',
+    {
+      title: 'Afterglow — 다중 인터뷰 (인계자 주도)',
+      description:
+        '인계자(인터뷰어)가 퇴사자(인터뷰이)를 여러 회차에 걸쳐 인터뷰합니다. handoff(본인 1회 셀프검수)와 달리 회차 무제한 — 빠진 부분을 메웁니다. ' +
+        'action=start | add-question | answer | gap-check(빠진 부분 자동 감지) | attach(음성·영상) | annotate(부재 시 주석) | status | list | inspect | finalize(이중 서명) | abort | transcribe. ' +
+        'gap-check 는 LLM 을 호출하지 않고 컨텍스트를 묶어 반환 — Claude 가 후속 질문을 생성합니다.',
+      inputSchema: interviewShape,
+    },
+    wrap(runInterview),
+  );
+
+  server.registerTool(
+    'afterglow_export',
+    {
+      title: 'Afterglow — 에이전트 내보내기 (다중)',
+      description:
+        '하나 이상의 에이전트 폴더를 portable 번들(폴더 + manifest.json + 무결성 해시)로 내보냅니다. slugs(다중) 또는 all=true. 받는 사람은 afterglow_import 로 바로 인식합니다. 번들은 압축해서 전달하거나 폴더째 복사하세요.',
+      inputSchema: exportShape,
+    },
+    wrap(runExport),
+  );
+
+  server.registerTool(
+    'afterglow_import',
+    {
+      title: 'Afterglow — 에이전트 가져오기 (핫플러그)',
+      description:
+        '다른 사용자가 만든 번들/에이전트 폴더를 가져옵니다. 스키마·서명·무결성 해시·심볼릭링크·프롬프트 인젝션을 검증하고 provenance(출처)를 기록합니다. 서명된 에이전트는 active, 미서명은 paused 로. --as(slug 변경) · --merge(인터뷰 병합) · --dryRun · --acceptBrokenChain 지원.',
+      inputSchema: importShape,
+    },
+    wrap(runImport),
+  );
+
+  server.registerTool(
+    'afterglow_verify',
+    {
+      title: 'Afterglow — 번들 사전 검증',
+      description:
+        'import 전에 번들/폴더를 읽기 전용으로 검증합니다. 스키마·서명·무결성·심볼릭링크·인젝션 의심을 체크리스트로 보여주되 로컬 저장소는 건드리지 않습니다.',
+      inputSchema: verifyShape,
+    },
+    wrap(runVerify),
   );
 
   return server;

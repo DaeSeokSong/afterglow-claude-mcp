@@ -6,6 +6,7 @@ import {
   checkAccess,
   readCorrections,
   readPersona,
+  readProvenance,
   readSystemPrompt,
 } from '../storage.js';
 import { retrieve, type Retrieval } from '../rag.js';
@@ -127,6 +128,29 @@ export async function runAsk(args: AskArgs): Promise<ToolReply> {
   // level section above the rest of the reply.
   lines.push(`# 호출 컨텍스트  ·  ${persona.slug}  (${sanitisePromptLine(persona.name, 200)})`);
   lines.push('');
+  // Provenance banner — if this agent was imported from another user, every
+  // answer should disclose the origin + trust level so the asker knows they're
+  // talking to a transferred persona, not one built on this machine.
+  const provenance = await readProvenance(args.slug);
+  if (provenance?.imported) {
+    lines.push('## 출처 (provenance)');
+    lines.push(
+      `이 에이전트는 외부에서 import 된 폴더입니다. ` +
+        `원 서명자: ${sanitisePromptLine(provenance.origin.signer ?? '(미상)', 200)} · ` +
+        `신뢰도: ${provenance.trustLevel}` +
+        (provenance.importedBy ? ` · 받은 사람: ${sanitisePromptLine(provenance.importedBy, 200)}` : ''),
+    );
+    if (provenance.trustLevel === 'broken-chain') {
+      lines.push('⚠ 무결성 검증 실패(변조 의심) 상태로 강제 import 되었습니다 — 답변 신뢰도를 낮추고 출처를 명시하세요.');
+    }
+    const annotations = provenance.postImportActivity.filter((a) => a.type === 'annotation');
+    if (annotations.length > 0) {
+      lines.push(
+        `⚠ 이 에이전트에는 인터뷰이 부재 상태의 "인계자 주석" ${annotations.length}건이 포함됩니다 — 해당 내용은 본인 미확인 추정입니다.`,
+      );
+    }
+    lines.push('');
+  }
   // The user `question` is attacker-controlled in a delegated `caller=…`
   // scenario. Fence + defang it so Claude can't be tricked into reading
   // its content as a system instruction (cross-tool hijack risk).

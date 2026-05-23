@@ -18,6 +18,12 @@ import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import type { Persona } from './persona.js';
+import type {
+  InterviewIndex,
+  InterviewSession,
+  FollowupConsent,
+  Provenance,
+} from './interview.js';
 
 /* --------------------------------------------------------------- */
 /* In-process per-slug + per-audit mutex                            */
@@ -136,6 +142,34 @@ export function handoffPath(slug: string): string {
 
 export function correctionsLogPath(slug: string): string {
   return join(agentDir(slug), 'corrections.log');
+}
+
+export function interviewsDir(slug: string): string {
+  return join(agentDir(slug), 'interviews');
+}
+
+export function interviewIndexPath(slug: string): string {
+  return join(interviewsDir(slug), 'index.json');
+}
+
+export function interviewSessionDir(slug: string, sessionId: string): string {
+  return join(interviewsDir(slug), sessionId);
+}
+
+export function interviewSessionPath(slug: string, sessionId: string): string {
+  return join(interviewSessionDir(slug, sessionId), 'session.json');
+}
+
+export function interviewAttachmentsDir(slug: string, sessionId: string): string {
+  return join(interviewSessionDir(slug, sessionId), 'attachments');
+}
+
+export function followupConsentPath(slug: string): string {
+  return join(agentDir(slug), 'followup.json');
+}
+
+export function provenancePath(slug: string): string {
+  return join(agentDir(slug), 'provenance.json');
 }
 
 /* --------------------------------------------------------------- */
@@ -483,6 +517,27 @@ export async function signConsent(
   await writeRegistry(reg);
 
   return { signedAt, signer: cleanSigner, previousStatus, newStatus: 'active' };
+}
+
+/**
+ * Extract every "- 서명자: X" name from consent.md, most recent last.
+ * Used by `interview` to bind the interviewee to whoever signed the agent
+ * (handoff signer / HR proxy) so a stranger can't pose as the persona owner.
+ * Returns [] when consent.md is absent or has no signatures yet.
+ */
+export async function readConsentSigners(slug: string): Promise<string[]> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(consentPath(slug), 'utf8');
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  for (const line of raw.split('\n')) {
+    const m = line.match(/^-\s*서명자:\s*(.+?)\s*$/);
+    if (m && m[1]) out.push(m[1].trim());
+  }
+  return out;
 }
 
 export async function pauseAgent(slug: string): Promise<RegistryEntry['status']> {
@@ -1007,6 +1062,108 @@ export async function deleteHandoff(slug: string): Promise<void> {
   } catch {
     /* already absent */
   }
+}
+
+/* --------------------------------------------------------------- */
+/* Interview sessions (multi-round)                                */
+/* --------------------------------------------------------------- */
+
+export async function readInterviewIndex(slug: string): Promise<InterviewIndex> {
+  try {
+    const raw = await fs.readFile(interviewIndexPath(slug), 'utf8');
+    const parsed = JSON.parse(raw);
+    const { InterviewIndexSchema } = await import('./interview.js');
+    const safe = InterviewIndexSchema.safeParse(parsed);
+    if (safe.success) return safe.data;
+    return parsed as InterviewIndex;
+  } catch {
+    return { version: 1, sessions: [] };
+  }
+}
+
+export async function writeInterviewIndex(slug: string, index: InterviewIndex): Promise<void> {
+  await ensureDir(interviewsDir(slug));
+  await fs.writeFile(interviewIndexPath(slug), JSON.stringify(index, null, 2) + '\n', 'utf8');
+}
+
+export async function readInterviewSession(
+  slug: string,
+  sessionId: string,
+): Promise<InterviewSession | null> {
+  try {
+    const raw = await fs.readFile(interviewSessionPath(slug, sessionId), 'utf8');
+    const parsed = JSON.parse(raw);
+    const { InterviewSessionSchema } = await import('./interview.js');
+    const safe = InterviewSessionSchema.safeParse(parsed);
+    return safe.success ? safe.data : (parsed as InterviewSession);
+  } catch {
+    return null;
+  }
+}
+
+export async function writeInterviewSession(
+  slug: string,
+  session: InterviewSession,
+): Promise<void> {
+  // Per-slug+session lock so two concurrent answer/attach writes can't clobber.
+  return withLock(`interview:${slug}:${session.sessionId}`, async () => {
+    await ensureDir(interviewSessionDir(slug, session.sessionId));
+    await fs.writeFile(
+      interviewSessionPath(slug, session.sessionId),
+      JSON.stringify(session, null, 2) + '\n',
+      'utf8',
+    );
+  });
+}
+
+export async function deleteInterviewSession(slug: string, sessionId: string): Promise<void> {
+  try {
+    await fs.rm(interviewSessionDir(slug, sessionId), { recursive: true, force: true });
+  } catch {
+    /* already absent */
+  }
+}
+
+/* --------------------------------------------------------------- */
+/* Followup pre-authorisation (handoff → interview bridge)         */
+/* --------------------------------------------------------------- */
+
+export async function readFollowupConsent(slug: string): Promise<FollowupConsent | null> {
+  try {
+    const raw = await fs.readFile(followupConsentPath(slug), 'utf8');
+    const parsed = JSON.parse(raw);
+    const { FollowupConsentSchema } = await import('./interview.js');
+    const safe = FollowupConsentSchema.safeParse(parsed);
+    return safe.success ? safe.data : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeFollowupConsent(slug: string, fc: FollowupConsent): Promise<void> {
+  await ensureDir(agentDir(slug));
+  await fs.writeFile(followupConsentPath(slug), JSON.stringify(fc, null, 2) + '\n', 'utf8');
+}
+
+/* --------------------------------------------------------------- */
+/* Provenance (chain of custody)                                   */
+/* --------------------------------------------------------------- */
+
+export async function readProvenance(slug: string): Promise<Provenance | null> {
+  try {
+    const raw = await fs.readFile(provenancePath(slug), 'utf8');
+    const parsed = JSON.parse(raw);
+    const { ProvenanceSchema } = await import('./interview.js');
+    const safe = ProvenanceSchema.safeParse(parsed);
+    return safe.success ? safe.data : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function writeProvenance(slug: string, prov: Provenance): Promise<void> {
+  await ensureDir(agentDir(slug));
+  await fs.writeFile(provenancePath(slug), JSON.stringify(prov, null, 2) + '\n', 'utf8');
 }
 
 /* --------------------------------------------------------------- */
