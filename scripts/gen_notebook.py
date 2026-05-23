@@ -35,7 +35,8 @@ md(r"""
 3. 💬  `ask` — 페르소나로 질문
 4. 🙋  `handoff` — 본인 셀프 검수 + **추가 인터뷰 사전 동의**
 5. 🎤  `interview` — 인계자 주도 다중 인터뷰 + **갭 자동 감지** + **음성 첨부** + 이중 서명
-6. 🔌  `export → verify → import` — 다른 사용자에게 **핫플러그**로 넘기기
+6. 🔌  `export → verify → import` — 다른 사용자에게 **핫플러그**로 넘기기 (+ v0.4 앵커 검증)
+7. 🖥  `status` · `gc` · `suggest-questions` · `transcribe` · `audit checkpoint` — 운영·정확도 (v0.3/v0.4)
 
 > **사전 준비**: Node ≥ 18 만 있으면 됩니다. Claude Code 설치 없이도 서버를 직접 호출해 결과를 봅니다.
 > 실제 사용 시에는 `claude mcp add afterglow npx -y @daeseoksong/afterglow-mcp` 후
@@ -294,13 +295,16 @@ code(r"""
 import re
 exp = A.show("afterglow_export", all=True, exportedBy="이지윤")
 bundle = re.search(r"위치:\s*(\S+)", exp).group(1)
-print("bundle =", bundle)
+anchor = re.search(r"번들 앵커 해시:\s*(\S+)", exp).group(1)   # v0.4: 위변조 탐지용 앵커
+print("bundle =", bundle, "\nanchor =", anchor)
 
 # 받는 사람 서버 (별도 데이터 폴더)
 B = Mcp(ROOT_B, "B·김후임")
 B.show("afterglow_init")
 B.show("afterglow_verify", input=bundle)
-B.show("afterglow_import", input=bundle, importedBy="김후임", from_="이지윤", trustSigner="이지윤")
+# --expectAnchor 로 매니페스트 위변조까지 검증하며 가져오기 (v0.4)
+B.show("afterglow_import", input=bundle, importedBy="김후임", from_="이지윤",
+       trustSigner="이지윤", expectAnchor=anchor)
 """)
 
 code(r"""
@@ -315,7 +319,45 @@ md(r"""
 > 때문입니다 — 헬퍼가 자동으로 `_` 를 떼어 MCP 키 `from` 으로 보냅니다. 실제 Claude
 > Code 에서는 `--from "이지윤"` 으로 자연스럽게 씁니다.
 
-## 7. 정리
+## 7. 운영·정확도 도구 (v0.3 / v0.4)
+
+추가로 운영을 돕는 도구들입니다 (모두 보내는 사람 A 의 스토어에서 시연):
+
+- 🖥 `status` — 전체 에이전트 상태·인터뷰·검토대기·import 출처를 한 화면
+- 🧹 `gc` — 오래된 스냅샷·미디어·보관함 정리 (기본 dry-run)
+- 💡 `interview suggest-questions` — 회차 시작 전 빠진 영역 기반 질문 제안
+- 📝 `interview transcribe --text` — 다듬은 전사본 저장 (RAG 인덱싱)
+- 🔐 `audit --checkpoint/--fast` — 대용량 감사 로그 증분 검증
+
+> RAG 랭킹은 v0.4 에서 **BM25** 로 업그레이드됐고(0원·오프라인), `AFTERGLOW_RAG_BACKEND=dense`
+> + 임베딩 엔드포인트를 주면 **dense-vector** 검색으로 전환됩니다(실패 시 자동 렉시컬 fallback).
+""")
+
+code(r"""
+# 전체 대시보드
+A.show("afterglow_status")
+
+# 정리 미리보기(dry-run — 실제 삭제 안 함)
+A.show("afterglow_gc", action="list")
+A.show("afterglow_gc", action="prune-versions", slug="jiyoon", keep=2)
+""")
+
+code(r"""
+# 다음 인터뷰 전, 빠진 영역 기반 질문 제안
+A.show("afterglow_interview", action="suggest-questions", slug="jiyoon")
+
+# 첨부 전사본을 다듬어 저장 (status=polished → RAG 인덱싱)
+A.show("afterglow_interview", action="transcribe", slug="jiyoon", session=sid,
+       file="clip.mp3", text="결제 fallback 은 토스 → 카카오 → 네이버 순. 5초 timeout 후 다음 PG.")
+
+# 감사 로그 체크포인트 + 빠른(증분) 검증
+A.show("afterglow_audit", checkpoint=True)
+A.show("afterglow_audit", fast=True)
+""")
+
+# --------------------------------------------------------------------------
+md(r"""
+## 8. 정리
 
 - `init → create → sign → ask` 로 페르소나 에이전트가 동작하고,
 - `handoff` 사전 동의 → `interview`(갭 감지 · 음성 첨부 · 이중 서명)로 인계자가
