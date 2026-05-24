@@ -129,6 +129,23 @@ try {
     );
   }
 
+  /* ---------- MCP prompts (slash commands /mcp__afterglow__<name>) ---------- */
+  const promptsList = await request('prompts/list', {});
+  const promptNames = (promptsList?.result?.prompts ?? []).map((p) => p.name);
+  for (const expected of ['init', 'create', 'ask', 'interview', 'export', 'status']) {
+    if (!promptNames.includes(expected)) {
+      throw new Error(`prompt missing: ${expected} (got ${JSON.stringify(promptNames)})`);
+    }
+  }
+  const promptGet = await request('prompts/get', {
+    name: 'ask',
+    arguments: { slug: 'jiyoon', question: '테스트' },
+  });
+  const promptText = promptGet?.result?.messages?.[0]?.content?.text ?? '';
+  if (!/afterglow_ask/.test(promptText)) {
+    throw new Error(`prompts/get ask did not route to the tool: ${promptText}`);
+  }
+
   /* ---------- happy-path call against every tool ---------- */
 
   assertOk('init', await callTool('afterglow_init', {}));
@@ -523,6 +540,7 @@ try {
   console.log(`  v0.3 dashboard     : status (${statusJson.totals.agents} agents) + gc list/dry-run  OK`);
   console.log(`  v0.3 suggest/transc: suggest-questions + transcribe --text save  OK`);
   console.log(`  v0.3 audit         : checkpoint (${cpJson.checkpoints}) + fast verify  OK`);
+  console.log(`  v0.5 prompts       : ${promptNames.length} slash commands (/mcp__afterglow__*)  OK`);
 } catch (err) {
   console.error('smoke: FAIL');
   console.error(err instanceof Error ? err.stack : String(err));

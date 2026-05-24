@@ -65,7 +65,13 @@ claude /afterglow list
 claude /afterglow ask jiyoon "온보딩 step 3 이탈, 어떻게 줄였어요?"
 ```
 
-> **참고 — `/afterglow X --flag` 표기에 대해.** Afterglow 는 MCP 서버이며, 도구는 실제로 `afterglow_handoff({slug: "jiyoon", action: "start", limit: 12})` 같은 JSON 호출입니다. Claude Code 가 `/afterglow handoff jiyoon --action start --limit 12` 같은 자연어 입력을 적절한 JSON 으로 자동 변환합니다 — 셸 플래그 파서가 따로 도는 게 아니에요. 본 README 의 모든 `claude /afterglow …` 예시는 Claude 가 해석할 자연어 표기로 이해하세요.
+> **참고 — 두 가지 호출 방식.** Afterglow 는 MCP 서버라 도구는 실제로 `afterglow_handoff({slug: "jiyoon", action: "start"})` 같은 JSON 호출입니다.
+> 1. **자연어**: "afterglow 초기화해줘" → Claude 가 알맞은 도구 호출.
+> 2. **슬래시 명령**: Claude Code 입력창에서 **`/mcp__afterglow__<이름>`** (예: `/mcp__afterglow__init`) 직접 호출 + 인자 자동완성 — MCP prompt 로 노출됩니다 (형식이 `/afterglow init` 이 아니라 `/mcp__afterglow__init`).
+>
+> 본 README 의 `claude /afterglow …` 표기는 약식이며, 실제로는 위 두 방식 중 하나로 씁니다.
+>
+> **슬래시 명령 14종** (입력창에서 `/mcp__afterglow__` 자동완성): `init` · `create`(slug,name,role) · `sign`(slug,signer) · `resume`(slug) · `list` · `status` · `inspect`(slug) · `ask`(slug,question) · `handoff`(slug,action) · `interview`(slug,action) · `council`(slugs,question) · `export`(slugs|all) · `import`(input) · `gc`(action). 예: `/mcp__afterglow__ask` → slug=jiyoon, question="온보딩 이탈 어떻게 줄였어요?". 인자 많은 액션은 자연어가 편합니다.
 
 ## 🪶 왜 만들었나
 
@@ -497,7 +503,8 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 - [x] **import `--expectAnchor`**(번들 위변조 탐지) + **audit checkpoint**(대용량 증분 검증)
 - [x] **BM25 RAG** + opt-in **dense-vector 백엔드** (`AFTERGLOW_RAG_BACKEND=dense`, embeddings/ 캐시)
 - [x] **whisper 모델 관리** (`transcribe --download/--list-models` + 자동 해석)
-- [x] vitest 208개 + 24 도구 stdio 핸드셰이크
+- [x] **MCP prompts → 슬래시 명령** `/mcp__afterglow__<이름>` (14종, 입력창에서 직접 호출 + 인자 자동완성)
+- [x] vitest 208개 + 24 도구 stdio 핸드셰이크 (prompts 포함)
 - [ ] whisper.cpp WASM 엔진 번들 (모델 lazy-download 까지 완전 자동)
 - [ ] per-tool ACL · Web companion · 정기 retention 자동화
 

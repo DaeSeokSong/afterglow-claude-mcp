@@ -113,7 +113,43 @@ claude /afterglow ask jiyoon "..."
 
 See [`server/README.md`](./server/README.md) for the full tool reference.
 
-> **A note on `/afterglow X --flag` syntax.** Afterglow is an MCP server — the actual tool calls are JSON like `afterglow_handoff({slug: "jiyoon", action: "start", limit: 12})`. Claude Code translates a natural-language line such as `/afterglow handoff jiyoon --action start --limit 12` into the right JSON; there is no shell-flag parser. Every `claude /afterglow …` example below is shorthand for what you'd say to Claude, not a literal CLI invocation.
+> **Two ways to invoke.** Afterglow is an MCP server, so the actual tool calls are JSON like `afterglow_handoff({slug: "jiyoon", action: "start"})`. You can drive it either way:
+> 1. **Natural language** — say "initialize afterglow" and Claude picks the right tool.
+> 2. **Slash command** — from Claude Code's prompt box, **`/mcp__afterglow__<name>`** (e.g. `/mcp__afterglow__init`, `/mcp__afterglow__ask`) with argument auto-complete. (Exposed as MCP prompts — note the form is `/mcp__afterglow__init`, not `/afterglow init`.)
+>
+> The `claude /afterglow …` notation in this README is shorthand for readability; in practice use one of the two ways above.
+
+### ⌨ Slash-command examples (`/mcp__afterglow__*`)
+
+Type `/mcp__afterglow__` in Claude Code's prompt box → an autocomplete list appears; pick one and it asks for the arguments. (Parenthesized args are optional.)
+
+| Goal | Slash command | Arguments | Natural-language alternative |
+| --- | --- | --- | --- |
+| Initialize | `/mcp__afterglow__init` | (none) | "initialize afterglow" |
+| Create agent | `/mcp__afterglow__create` | `slug` `name` `role` (`tenure` `bio`) | "create agent jiyoon, Jiyoon Lee, product designer" |
+| Sign → active | `/mcp__afterglow__sign` | `slug` `signer` | "sign jiyoon as Jiyoon Lee" |
+| List | `/mcp__afterglow__list` | (`status`) | "show afterglow list" |
+| Dashboard | `/mcp__afterglow__status` | (none) | "afterglow status" |
+| Inspect | `/mcp__afterglow__inspect` | `slug` | "inspect jiyoon" |
+| Ask | `/mcp__afterglow__ask` | `slug` `question` | "ask jiyoon how the payment fallback worked" |
+| Self-handoff | `/mcp__afterglow__handoff` | `slug` `action` (`signer`) | "start a handoff for jiyoon" |
+| Interview | `/mcp__afterglow__interview` | `slug` `action` (`session` `title` `interviewer`) | "start an interview for jiyoon, title Payment gaps, interviewer J. Kim" |
+| Council | `/mcp__afterglow__council` | `slugs` `question` | "convene jiyoon and jaehoon" |
+| Export | `/mcp__afterglow__export` | `slugs` or `all` | "export jiyoon" |
+| Import | `/mcp__afterglow__import` | `input` (`expectAnchor`) | "import this bundle: ./afterglow-export-…/" |
+| GC / retention | `/mcp__afterglow__gc` | `action` (`slug` `apply`) | "preview pruning old snapshots" |
+| Resume | `/mcp__afterglow__resume` | `slug` | "resume jiyoon" |
+
+**Example flow** (slash):
+```text
+/mcp__afterglow__init
+/mcp__afterglow__create     → slug: jiyoon · name: Jiyoon Lee · role: Product Designer
+/mcp__afterglow__sign       → slug: jiyoon · signer: Jiyoon Lee
+/mcp__afterglow__ask        → slug: jiyoon · question: how did you cut step-3 drop-off?
+/mcp__afterglow__interview  → slug: jiyoon · action: start · title: Payment gaps · interviewer: J. Kim
+```
+
+> Tools with many arguments (e.g. interview `attach`/`answer`) are often easier in natural language. Slash commands shine for the frequent entry points (init, create, ask, status, …).
 
 ## 📐 Interactive proposal (frontend)
 
@@ -393,7 +429,8 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 - [x] **import `--expectAnchor`** (bundle-tamper detection) + **audit checkpoint/fast** (incremental verification for large logs)
 - [x] **BM25 ranking** + opt-in **dense-vector backend** (`AFTERGLOW_RAG_BACKEND=dense` · embeddings/ cache · transparent lexical fallback)
 - [x] **whisper model management** (`transcribe --download/--list-models` + auto-resolution)
-- [x] 208 vitest + extended stdio handshake (covers all 24 tools)
+- [x] **Slash commands** `/mcp__afterglow__<name>` — 14 MCP prompts callable straight from the prompt box
+- [x] 208 vitest + extended stdio handshake (covers all 24 tools + prompts)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 - [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
 

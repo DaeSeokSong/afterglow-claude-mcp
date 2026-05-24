@@ -33,6 +33,13 @@
  *   - afterglow_status           (/afterglow status)
  *   - afterglow_gc               (/afterglow gc --action list|prune-versions|purge-media|purge-archive)
  *
+ * It also registers MCP *prompts*, which Claude Code surfaces as slash commands
+ * `/mcp__afterglow__<name>` (init · create · sign · resume · list · status ·
+ * inspect · ask · handoff · interview · council · export · import · gc). Each
+ * prompt is a thin typed entry point that expands into a request for Claude to
+ * call the matching tool — so users can drive Afterglow by natural language OR
+ * directly from the prompt box.
+ *
  * `ask`, `council`, `interview gap-check` and `interview suggest-questions` do
  * NOT call an LLM. They return persona + RAG context so Claude in the user's
  * session composes the answer. RAG ranks with BM25 (or an opt-in dense backend).
@@ -64,9 +71,10 @@ import { importShape, runImport } from './tools/import.js';
 import { verifyShape, runVerify } from './tools/verify.js';
 import { statusShape, runStatus } from './tools/status.js';
 import { gcShape, runGc } from './tools/gc.js';
+import { registerPrompts } from './prompts.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.4.0';
+const SERVER_VERSION = '0.5.0';
 
 export function buildServer(): McpServer {
   const server = new McpServer(
@@ -349,6 +357,10 @@ export function buildServer(): McpServer {
     },
     wrap(runGc),
   );
+
+  // Slash commands: /mcp__afterglow__<name> in Claude Code's prompt box.
+  // Thin typed entry points that route to the tools above.
+  registerPrompts(server);
 
   return server;
 }
