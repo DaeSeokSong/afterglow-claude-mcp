@@ -13,7 +13,7 @@ import { ALWAYS_EXCLUDE, computeBundleHash, hashFolder, type BundleAgent, type B
 import { sanitisePromptLine } from '../sanitize.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
-const SERVER_VERSION = '0.4.0';
+const SERVER_VERSION = '0.5.0';
 
 export const exportShape = {
   slugs: z

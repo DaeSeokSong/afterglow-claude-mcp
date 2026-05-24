@@ -113,7 +113,11 @@ claude /afterglow ask jiyoon "..."
 
 See [`server/README.md`](./server/README.md) for the full tool reference.
 
-> **A note on `/afterglow X --flag` syntax.** Afterglow is an MCP server — the actual tool calls are JSON like `afterglow_handoff({slug: "jiyoon", action: "start", limit: 12})`. Claude Code translates a natural-language line such as `/afterglow handoff jiyoon --action start --limit 12` into the right JSON; there is no shell-flag parser. Every `claude /afterglow …` example below is shorthand for what you'd say to Claude, not a literal CLI invocation.
+> **Two ways to invoke.** Afterglow is an MCP server, so the actual tool calls are JSON like `afterglow_handoff({slug: "jiyoon", action: "start"})`. You can drive it either way:
+> 1. **Natural language** — say "initialize afterglow" and Claude picks the right tool.
+> 2. **Slash command** — from Claude Code's prompt box, **`/mcp__afterglow__<name>`** (e.g. `/mcp__afterglow__init`, `/mcp__afterglow__ask`) with argument auto-complete. (Exposed as MCP prompts — note the form is `/mcp__afterglow__init`, not `/afterglow init`.)
+>
+> The `claude /afterglow …` notation in this README is shorthand for readability; in practice use one of the two ways above.
 
 ## 📐 Interactive proposal (frontend)
 
@@ -393,7 +397,8 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 - [x] **import `--expectAnchor`** (bundle-tamper detection) + **audit checkpoint/fast** (incremental verification for large logs)
 - [x] **BM25 ranking** + opt-in **dense-vector backend** (`AFTERGLOW_RAG_BACKEND=dense` · embeddings/ cache · transparent lexical fallback)
 - [x] **whisper model management** (`transcribe --download/--list-models` + auto-resolution)
-- [x] 208 vitest + extended stdio handshake (covers all 24 tools)
+- [x] **Slash commands** `/mcp__afterglow__<name>` — 14 MCP prompts callable straight from the prompt box
+- [x] 208 vitest + extended stdio handshake (covers all 24 tools + prompts)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 - [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
 

@@ -113,7 +113,11 @@ claude /afterglow ask jiyoon "..."
 
 자세한 내용은 [`server/README.md`](./server/README.md) 참고.
 
-> **참고 — `/afterglow X --flag` 표기에 대해.** Afterglow 는 MCP 서버이며, 도구는 실제로 `afterglow_handoff({slug:"jiyoon", action:"start", limit:12})` 같은 JSON 호출입니다. Claude Code 가 `/afterglow handoff jiyoon --action start --limit 12` 자연어 입력을 적절한 JSON 으로 자동 변환합니다 — 셸 플래그 파서가 따로 도는 게 아니에요. 본 README 의 모든 `claude /afterglow …` 예시는 Claude 가 해석할 자연어 표기로 이해하시면 됩니다.
+> **참고 — 두 가지 호출 방식.** Afterglow 는 MCP 서버라 도구는 실제로 `afterglow_handoff({slug:"jiyoon", action:"start"})` 같은 JSON 호출입니다. 두 가지로 부를 수 있어요:
+> 1. **자연어** — "afterglow 초기화해줘" 처럼 말하면 Claude 가 알맞은 도구를 호출합니다.
+> 2. **슬래시 명령** — Claude Code 입력창에서 **`/mcp__afterglow__<이름>`** (예: `/mcp__afterglow__init`, `/mcp__afterglow__ask`)으로 직접 호출 + 인자 자동완성. (MCP prompt로 노출 — 형식이 `/afterglow init` 이 아니라 `/mcp__afterglow__init` 인 점만 유의)
+>
+> 본 README 의 `claude /afterglow …` 표기는 가독성을 위한 약식이며, 실제로는 위 두 방식 중 하나로 쓰시면 됩니다.
 
 ## 📐 인터랙티브 제안서 (프론트)
 
@@ -392,7 +396,8 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 - [x] **import `--expectAnchor`** (번들 위변조 탐지) + **audit checkpoint/fast** (대용량 증분 검증)
 - [x] **BM25 RAG 랭킹** + opt-in **dense-vector 백엔드** (`AFTERGLOW_RAG_BACKEND=dense` · embeddings/ 캐시 · 실패 시 렉시컬 fallback)
 - [x] **whisper 모델 관리** (`transcribe --download/--list-models` + 자동 해석)
-- [x] vitest 208개 + stdio 핸드셰이크 (24 도구 전체 검증)
+- [x] **슬래시 명령** `/mcp__afterglow__<이름>` — MCP prompt 14종으로 입력창에서 직접 호출
+- [x] vitest 208개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 - [x] **핸즈온 Jupyter 노트북** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — 초보자용 전 기능 따라하기
 
