@@ -132,7 +132,7 @@ try {
   /* ---------- MCP prompts (slash commands /mcp__afterglow__<name>) ---------- */
   const promptsList = await request('prompts/list', {});
   const promptNames = (promptsList?.result?.prompts ?? []).map((p) => p.name);
-  for (const expected of ['init', 'create', 'ask', 'interview', 'export', 'status']) {
+  for (const expected of ['init', 'create', 'edit', 'ask', 'interview', 'export', 'status']) {
     if (!promptNames.includes(expected)) {
       throw new Error(`prompt missing: ${expected} (got ${JSON.stringify(promptNames)})`);
     }

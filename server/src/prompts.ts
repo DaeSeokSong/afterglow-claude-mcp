@@ -106,6 +106,27 @@ export function registerPrompts(server: McpServer): void {
     async ({ slug, question }) => ask(`Afterglow \`afterglow_ask\` 도구를 호출해줘: ${kv({ slug, question })}`),
   );
 
+  server.registerPrompt(
+    'edit',
+    {
+      title: 'Afterglow: 수정',
+      description: '페르소나 수정 — 필드 직접 수정 / 에디터로 열기(open) / 직접 수정 재검증(revalidate) (afterglow_edit)',
+      argsSchema: {
+        slug: z.string().describe('대상 slug'),
+        bio: z.string().optional().describe('한 줄 소개 변경'),
+        name: z.string().optional().describe('이름 변경'),
+        role: z.string().optional().describe('직무 변경'),
+        open: z.string().optional().describe('"true" → vim 등으로 직접 편집할 파일 경로 안내'),
+        revalidate: z.string().optional().describe('"true" → 직접 수정한 persona.json 재검증·재생성'),
+      },
+    },
+    async ({ slug, bio, name, role, open, revalidate }) => {
+      if (open === 'true') return ask(`Afterglow \`afterglow_edit\` 도구를 호출해줘: slug="${slug}", open=true (에디터로 직접 편집할 파일 경로 안내).`);
+      if (revalidate === 'true') return ask(`Afterglow \`afterglow_edit\` 도구를 호출해줘: slug="${slug}", revalidate=true (직접 수정한 persona.json 재검증·재생성).`);
+      return ask(`Afterglow \`afterglow_edit\` 도구를 호출해줘: ${kv({ slug, bio, name, role })}`);
+    },
+  );
+
   /* ---- handoff / interview ---- */
   server.registerPrompt(
     'handoff',

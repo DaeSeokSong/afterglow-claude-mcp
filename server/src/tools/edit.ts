@@ -1,9 +1,12 @@
 import { z } from 'zod';
+import { promises as fs } from 'node:fs';
 import {
   appendHistory,
   assertInitialized,
   assertWritable,
   getStatus,
+  knowledgeDir,
+  personaPath,
   readPersona,
   snapshotPersona,
   writePersona,
@@ -71,6 +74,11 @@ export const editShape = {
 
   /** Dry-run: 변경사항만 보여주고 저장 안 함. */
   dryRun: z.boolean().optional(),
+
+  /** 에디터로 직접 편집: persona.json 경로를 안내하고 백업 스냅샷을 남김 (vim/code 등). 저장 안 함. */
+  open: z.boolean().optional(),
+  /** 에디터로 직접 수정한 persona.json 을 재검증 + system-prompt.md 재생성 + 스냅샷. */
+  revalidate: z.boolean().optional(),
 } as const;
 
 interface EditArgs {
@@ -91,6 +99,8 @@ interface EditArgs {
   confidenceFloor?: number;
   peerAskThreshold?: number;
   dryRun?: boolean;
+  open?: boolean;
+  revalidate?: boolean;
 }
 
 function uniq<T>(xs: T[]): T[] {
@@ -137,6 +147,69 @@ export async function runEdit(args: EditArgs): Promise<ToolReply> {
       await assertWritable(args.slug);
     } catch (e) {
       return errorReply((e as Error).message);
+    }
+
+    // ── Editor mode: point the user at the raw file (vim/code/…) ──
+    if (args.open) {
+      const snap = await snapshotPersona(args.slug, 'edit open (pre-manual-edit backup)');
+      const lines = [
+        `✦ ${args.slug} 직접 편집 모드`,
+        '',
+        `  편집할 파일:  ${personaPath(args.slug)}`,
+        `  자료 추가:    ${knowledgeDir(args.slug)}/ 에 .md·.txt·.csv·.jsonl 파일 추가`,
+        '',
+        '  예) vim, code, nano 등으로 열어 수정 후 저장하세요.',
+        `  ⚠ system-prompt.md 는 자동 생성물이라 직접 편집하지 마세요 — revalidate 가 덮어씁니다.`,
+        '',
+        `  백업 스냅샷 ${snap.id} 생성됨 — 잘못 고쳐도 version rollback 으로 복구 가능.`,
+        '',
+        '  편집을 마치면:',
+        `  /mcp__afterglow__edit  (revalidate=true, slug=${args.slug})  — 재검증 + system-prompt 재생성`,
+      ];
+      await appendHistory(args.slug, `edit open (snapshot ${snap.id})`);
+      return { content: [{ type: 'text', text: lines.join('\n') }] };
+    }
+
+    // ── Revalidate mode: re-parse a hand-edited persona.json ──
+    if (args.revalidate) {
+      let raw: string;
+      try {
+        raw = await fs.readFile(personaPath(args.slug), 'utf8');
+      } catch (e) {
+        return errorReply(`persona.json 을 읽을 수 없습니다: ${(e as Error).message}`);
+      }
+      let parsedJson: unknown;
+      try {
+        parsedJson = JSON.parse(raw);
+      } catch (e) {
+        return errorReply(`persona.json JSON 파싱 실패 (직접 편집 중 문법 오류?): ${(e as Error).message}`);
+      }
+      const result = PersonaSchema.safeParse(parsedJson);
+      if (!result.success) {
+        return errorReply(
+          `persona.json 검증 실패 — 저장하지 않았습니다. 파일을 고친 뒤 다시 revalidate 하세요:\n` +
+            result.error.issues.map((i) => `  • ${i.path.join('.')}: ${i.message}`).join('\n'),
+        );
+      }
+      const snap = await snapshotPersona(args.slug, 'edit revalidate (post-manual-edit)');
+      result.data.updatedAt = new Date().toISOString();
+      await writePersona(args.slug, result.data);
+      await writeSystemPrompt(args.slug, renderSystemPrompt(result.data));
+      await appendHistory(args.slug, `edit revalidate (manual edit, snapshot ${snap.id})`);
+      await auditAppend({
+        tool: 'afterglow_edit',
+        slug: args.slug,
+        summary: 'revalidate manual edit',
+        meta: { snapshot: snap.id },
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✓ ${args.slug} persona.json 재검증 통과 → system-prompt.md 재생성 + 스냅샷 ${snap.id}. 직접 편집 내용이 반영됐어요.`,
+          },
+        ],
+      };
     }
 
     const current = await readPersona(args.slug);

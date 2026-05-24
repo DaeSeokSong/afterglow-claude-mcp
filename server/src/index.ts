@@ -35,7 +35,9 @@
  *
  * It also registers MCP *prompts*, which Claude Code surfaces as slash commands
  * `/mcp__afterglow__<name>` (init · create · sign · resume · list · status ·
- * inspect · ask · handoff · interview · council · export · import · gc). Each
+ * inspect · ask · edit · handoff · interview · council · export · import · gc).
+ * `edit` also supports open (show persona.json path for vim/editor) + revalidate
+ * (re-validate a hand-edited persona.json + regenerate system-prompt). Each
  * prompt is a thin typed entry point that expands into a request for Claude to
  * call the matching tool — so users can drive Afterglow by natural language OR
  * directly from the prompt box.
@@ -74,7 +76,7 @@ import { gcShape, runGc } from './tools/gc.js';
 import { registerPrompts } from './prompts.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.5.0';
+const SERVER_VERSION = '0.6.0';
 
 export function buildServer(): McpServer {
   const server = new McpServer(
