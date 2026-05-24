@@ -364,10 +364,10 @@ Afterglow/
 │  │  ├─ persona.ts        ← zod schema + system-prompt rendering
 │  │  ├─ interview.ts      ← interview/attachment/signature/provenance schema
 │  │  ├─ portable.ts       ← bundle manifest + folder hash + injection scan
-│  │  ├─ rag.ts            ← TF-IDF retrieval (knowledge/ + interview transcripts)
+│  │  ├─ rag.ts            ← BM25 / dense / hybrid retrieval (knowledge/ + interview transcripts)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 22 tools: …18 above… + interview · export · import · verify
-│  └─ test/                ← 208 vitest + stdio handshake (covers all 24 tools)
+│  └─ test/                ← 228 vitest + stdio handshake (covers all 24 tools)
 │
 └─ docs/
    └─ design-source/       ← original claude.ai/design hand-off (JSX) — reference
@@ -420,7 +420,7 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 208 vitest tests
+npm test             # 228 vitest tests
 npm run test:stdio   # real MCP stdio handshake (all 24 tools + v0.3/v0.4 round-trips)
 npm run test:all     # unit → build → stdio
 ```
@@ -439,14 +439,15 @@ Afterglow v0.2.0 is a **proof of concept**. Things to know before pulling it int
 | **GDPR delete** | `archive` only moves to `archive/<slug>/` — not real deletion | After retention window, manual `rm -rf` + registry edit |
 | **Multi-process** | In-process locks only — assumes one stdio server | Externalise to Redis/DB mutex for distributed runs |
 | **Side-log integrity** | Only `audit.log` is hash-chained — `history.log` / `consent.md` etc are plain text | Hash sibling files into audit `meta` for full coverage |
-| **Media transcription** | Tier 0 only (bring-your-own transcript) — no built-in speech-to-text | Opt-in local whisper.cpp (Tier 1) / external STT API (Tier 2) |
+| **Media transcription** | WASM whisper (Tier 1a, `@xenova/transformers` optionalDependency) / local whisper.cpp (Tier 1b) / bring-your-own transcript (Tier 0); model downloads once on first use | Larger model or external STT (Tier 2) when accuracy matters |
+| **PII · encryption** | Transcript-only PII masking (`AFTERGLOW_PII_REDACT=1`) + at-rest encryption (`AFTERGLOW_ENCRYPTION_KEY`, AES-256-GCM) — off by default | Scrub/encrypt user-dropped knowledge files before ingest |
 | **Import trust** | Name-string match + folder hash + injection scan (PoC) | Tie to signer PKI / corporate ID verification |
 
 These are deliberate PoC trade-offs; closing them is a separate exercise for any operational deployment.
 
 ## 🗺 Roadmap
 
-### Now (v0.3.0)
+### Now (v0.8.0)
 - [x] 18-screen interactive proposal (Vite + React 19 + TS)
 - [x] Cmd+K palette + keyboard shortcuts + cross-screen click navigation
 - [x] All 24 MCP tools (`init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · **`interview`** · **`export`** · **`import`** · **`verify`** · **`status`** · **`gc`**)
@@ -463,15 +464,19 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 - [x] **Transcription** (`interview transcribe` — local whisper `--apply` / Claude polish `--text`) + **pre-interview question suggestions** (`suggest-questions`) + **review-then-index** (`review`)
 - [x] **import `--expectAnchor`** (bundle-tamper detection) + **audit checkpoint/fast** (incremental verification for large logs)
 - [x] **BM25 ranking** + opt-in **dense-vector backend** (`AFTERGLOW_RAG_BACKEND=dense` · embeddings/ cache · transparent lexical fallback)
+- [x] **Hybrid RAG reranking** — RRF (Reciprocal Rank Fusion) of dense + lexical (on by default when dense is active; `AFTERGLOW_RAG_HYBRID=off` to disable)
+- [x] **WASM whisper engine** (`transcribe --apply`) — `@xenova/transformers` optionalDependency, no native build; `AFTERGLOW_WHISPER_ENGINE=auto` (WASM→native) · model auto-downloads on first use · whisper.cpp binary tier as fallback
 - [x] **whisper model management** (`transcribe --download/--list-models` + auto-resolution)
+- [x] **PII masking + at-rest encryption** — transcript-only email/phone/RRN/card/token masking (`AFTERGLOW_PII_REDACT=1`) + AES-256-GCM (`AFTERGLOW_ENCRYPTION_KEY`); RAG decrypts transparently so search still works
+- [x] **Auto question-suggestion on new interview** — `interview start` embeds a 4-signal gap analysis and asks "proceed with these questions?" (disable with `suggest=false`)
 - [x] **Slash commands** `/mcp__afterglow__<name>` — 24 MCP prompts (one per tool) — type `afterglow:` → Tab to invoke
-- [x] 208 vitest + extended stdio handshake (covers all 24 tools + prompts)
+- [x] 228 vitest + extended stdio handshake (covers all 24 tools + prompts)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 - [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
 
 ### Next
-- [ ] Bundled whisper.cpp WASM engine (fully automatic incl. model lazy-download)
 - [ ] per-tool ACL · scheduled retention · Web companion
+- [ ] Bulk encrypt/decrypt tool extending to knowledge files · external STT (Tier 2) adapter
 
 [Issues & PRs welcome](https://github.com/DaeSeokSong/Afterglow/issues/new).
 

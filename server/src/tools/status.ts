@@ -8,6 +8,9 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { sanitisePromptLine } from '../sanitize.js';
+import { ragMode } from '../rag.js';
+import { encryptionEnabled, redactionEnabled } from '../privacy.js';
+import { whisperEngine } from '../whisper.js';
 import { safe, type ToolReply } from './types.js';
 
 export const statusShape = {
@@ -85,8 +88,17 @@ export async function runStatus(args: StatusArgs): Promise<ToolReply> {
       imported: summaries.filter((s) => s.imported).length,
     };
 
+    // Process-level config (env-driven) — surfaced so an operator can confirm
+    // at a glance which engine / privacy posture this server is running with.
+    const env = {
+      ragMode: ragMode(),
+      piiRedaction: redactionEnabled(),
+      encryptionAtRest: encryptionEnabled(),
+      whisperEngine: whisperEngine(),
+    };
+
     if (args.json) {
-      return { content: [{ type: 'text', text: JSON.stringify({ totals, agents: summaries }, null, 2) }] };
+      return { content: [{ type: 'text', text: JSON.stringify({ totals, env, agents: summaries }, null, 2) }] };
     }
 
     const lines: string[] = [];
@@ -100,6 +112,9 @@ export async function runStatus(args: StatusArgs): Promise<ToolReply> {
       `에이전트 ${totals.agents} (active ${totals.active} · 미서명 ${totals.unsigned} · archived ${totals.archived} · import ${totals.imported})`,
     );
     lines.push(`인터뷰 ${totals.interviews} 회차 · pending-confirmation ${totals.pendingInterviews} · 검토대기 미디어 ${totals.reviewPending}`);
+    lines.push(
+      `환경 · RAG ${env.ragMode} · PII마스킹 ${env.piiRedaction ? 'on' : 'off'} · 저장암호화 ${env.encryptionAtRest ? 'on' : 'off'} · whisper ${env.whisperEngine}`,
+    );
     lines.push('');
     for (const s of summaries) {
       const dot =

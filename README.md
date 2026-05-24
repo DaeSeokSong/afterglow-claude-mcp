@@ -366,7 +366,7 @@ Afterglow/
 │  │  ├─ portable.ts       ← 번들 manifest + 해시 + 인젝션 스캔
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 24 도구: …+ interview · export · import · verify · status · gc
-│  └─ test/                ← vitest 208 + stdio 핸드셰이크 (24 도구)
+│  └─ test/                ← vitest 228 + stdio 핸드셰이크 (24 도구)
 │
 └─ docs/
    └─ design-source/       ← claude.ai/design 핸드오프 원본 (JSX) — 참조용
@@ -438,14 +438,15 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 | **GDPR 삭제** | `archive` 는 `archive/<slug>/` 로 이동만 — 실제 삭제 아님 | 만료 후 수동 `rm -rf` + registry 정리 |
 | **다중 프로세스** | in-process lock 만 — 단일 stdio 서버 가정 | 분산 운영 시 외부 mutex (Redis/DB) 필요 |
 | **사이드 로그 무결성** | `audit.log` 만 해시 체인 — `history.log` / `consent.md` 등은 평문 | 운영 시 sibling 파일도 audit meta 에 해시 |
-| **미디어 자동 전사** | Tier 0(직접 전사본)만 내장 — 음성→텍스트 STT 미내장 | 로컬 whisper.cpp(Tier 1)/외부 STT(Tier 2) 옵트인 |
+| **미디어 자동 전사** | WASM whisper(Tier 1a, `@xenova/transformers` optionalDependency) / 로컬 whisper.cpp(Tier 1b) / 직접 전사본(Tier 0). model 은 최초 1회 다운로드 | 정확도 필요 시 large 모델 또는 외부 STT(Tier 2) |
+| **PII·암호화** | 전사본에 한해 PII 마스킹(`AFTERGLOW_PII_REDACT=1`) + 저장 암호화(`AFTERGLOW_ENCRYPTION_KEY`, AES-256-GCM) — 기본 off | 사용자 드롭 knowledge 파일은 적재 전 직접 스크럽/암호화 권장 |
 | **import 신뢰** | 이름 대조 + 폴더 해시 + 인젝션 스캔 (PoC) | 서명자 PKI / 사내 ID 검증과 묶어 사용 |
 
 이 모두는 PoC 의 의도된 trade-off 이며, 진짜 운영하려면 별도 환경에서 보완해야 합니다.
 
 ## 🗺 Roadmap
 
-### 현재 (v0.3.0)
+### 현재 (v0.8.0)
 - [x] 18 화면 인터랙티브 제안서 (Vite + React 19 + TS)
 - [x] Cmd+K 팔레트 + 키보드 단축키 + 화면 간 클릭 네비
 - [x] **MCP 서버 24 도구**: `init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · **`interview`** · **`export`** · **`import`** · **`verify`** · **`status`** · **`gc`**
@@ -462,15 +463,19 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 - [x] **전사** (`interview transcribe` — 로컬 whisper `--apply` / Claude polish `--text`) + **회차 전 질문 제안** (`suggest-questions`) + **검토 후 인덱싱** (`review`)
 - [x] **import `--expectAnchor`** (번들 위변조 탐지) + **audit checkpoint/fast** (대용량 증분 검증)
 - [x] **BM25 RAG 랭킹** + opt-in **dense-vector 백엔드** (`AFTERGLOW_RAG_BACKEND=dense` · embeddings/ 캐시 · 실패 시 렉시컬 fallback)
+- [x] **하이브리드 RAG 재랭킹** — dense + lexical 을 **RRF(Reciprocal Rank Fusion)** 로 결합 (dense 일 때 기본 on, `AFTERGLOW_RAG_HYBRID=off` 로 해제)
+- [x] **WASM whisper 엔진** (`transcribe --apply`) — `@xenova/transformers` optionalDependency, 네이티브 빌드 불필요. `AFTERGLOW_WHISPER_ENGINE=auto`(WASM→native) · model 최초 1회 자동 다운로드 · whisper.cpp 바이너리 tier 도 폴백 지원
 - [x] **whisper 모델 관리** (`transcribe --download/--list-models` + 자동 해석)
+- [x] **PII 마스킹 + 저장 암호화** — 전사본에 한해 이메일·전화·주민번호·카드·토큰 마스킹(`AFTERGLOW_PII_REDACT=1`) + AES-256-GCM 암호화(`AFTERGLOW_ENCRYPTION_KEY`). RAG 는 투명 복호화로 그대로 검색
+- [x] **신규 인터뷰 자동 질문 제안** — `interview start` 시 4-신호 갭 분석을 동봉하고 "이 질문들로 진행할까요?" 를 자동으로 물어봄 (`suggest=false` 로 해제)
 - [x] **슬래시 명령** `/mcp__afterglow__<이름>` — MCP prompt 24종(도구 전부)으로 `afterglow:` 입력→Tab 호출
-- [x] vitest 208개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
+- [x] vitest 228개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 - [x] **핸즈온 Jupyter 노트북** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — 초보자용 전 기능 따라하기
 
 ### 다음
-- [ ] whisper.cpp WASM 엔진 번들 (모델 lazy-download 까지 완전 자동)
 - [ ] per-tool ACL · 정기 retention 자동화 · Web companion
+- [ ] knowledge 파일까지 확장한 일괄 암호화/복호화 도구 · 외부 STT(Tier 2) 어댑터
 
 [기여 환영](https://github.com/DaeSeokSong/Afterglow/issues/new) — 이슈 / PR / 사용 사례 모두 좋아요.
 

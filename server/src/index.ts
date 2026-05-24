@@ -44,7 +44,13 @@
  *
  * `ask`, `council`, `interview gap-check` and `interview suggest-questions` do
  * NOT call an LLM. They return persona + RAG context so Claude in the user's
- * session composes the answer. RAG ranks with BM25 (or an opt-in dense backend).
+ * session composes the answer. RAG ranks with BM25, an opt-in dense backend, or
+ * (default when dense is on) a hybrid RRF fusion of both.
+ *
+ * v0.8 adds: a WASM whisper tier for `transcribe --apply` (no native build —
+ * @xenova/transformers optionalDependency), opt-in PII masking
+ * (AFTERGLOW_PII_REDACT) + encryption-at-rest (AFTERGLOW_ENCRYPTION_KEY) for
+ * transcripts, and auto question-suggestion on `interview start`.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -76,7 +82,7 @@ import { gcShape, runGc } from './tools/gc.js';
 import { registerPrompts } from './prompts.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.7.0';
+const SERVER_VERSION = '0.8.0';
 
 export function buildServer(): McpServer {
   const server = new McpServer(
