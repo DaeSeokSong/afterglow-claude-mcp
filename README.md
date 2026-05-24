@@ -119,48 +119,72 @@ claude /afterglow ask jiyoon "..."
 >
 > 본 README 의 `claude /afterglow …` 표기는 가독성을 위한 약식이며, 실제로는 위 두 방식 중 하나로 쓰시면 됩니다.
 
-### ⌨ 슬래시 명령 예시 (`/mcp__afterglow__*`)
+### ⌨ 슬래시 명령 — `afterglow:` 입력으로 쓰기 (24개)
 
-Claude Code 입력창에 `/mcp__afterglow__` 까지 치면 자동완성 목록이 뜨고, 선택하면 인자 칸이 나옵니다. (괄호 인자는 선택)
+**입력 흐름:**
+1. 입력창에 **`afterglow:`** 를 치면 명령어 목록이 뜹니다.
+2. 화살표 키로 원하는 명령을 고른 뒤 **Tab**.
+3. **`/mcp__afterglow__<이름>`** 형식으로 입력되고, **회색 힌트**로 채울 인자가 보입니다 — 값을 입력해 실행.
 
-| 하고 싶은 것 | 슬래시 명령 | 채울 인자 | 자연어 대안 |
+> `afterglow:init` ⇥ `/mcp__afterglow__init` 처럼 1:1 대응입니다 (`afterglow:` = 입력·검색용, `/mcp__afterglow__` = 실행 형식). 자연어("afterglow 초기화해줘")로도 동일하게 호출됩니다. 인자가 많은 동작(interview attach·answer 등)은 자연어가 더 편할 수 있어요.
+
+#### 셋업 · 서명 · 보관
+| 명령 | 인자 (괄호=선택) | 설명 | 예시 |
 | --- | --- | --- | --- |
-| 초기화 | `/mcp__afterglow__init` | (없음) | "afterglow 초기화해줘" |
-| 에이전트 생성 | `/mcp__afterglow__create` | `slug` `name` `role` (`tenure` `bio`) | "jiyoon 에이전트 만들어줘, 이지윤 프로덕트 디자이너" |
-| 서명 → active | `/mcp__afterglow__sign` | `slug` `signer` | "jiyoon 을 이지윤 이름으로 서명" |
-| 목록 | `/mcp__afterglow__list` | (`status`) | "afterglow 목록 보여줘" |
-| 전체 대시보드 | `/mcp__afterglow__status` | (없음) | "afterglow 상태 알려줘" |
-| 상세 보기 | `/mcp__afterglow__inspect` | `slug` | "jiyoon 상세 보여줘" |
-| 질문 | `/mcp__afterglow__ask` | `slug` `question` | "jiyoon 에게 결제 fallback 어떻게 했는지 물어봐" |
-| 수정 | `/mcp__afterglow__edit` | `slug` (`bio` `name` `role` / `open` / `revalidate`) | "jiyoon 소개를 …로 바꿔줘" |
-| 본인 인계 | `/mcp__afterglow__handoff` | `slug` `action` (`signer`) | "jiyoon handoff start 해줘" |
-| 다중 인터뷰 | `/mcp__afterglow__interview` | `slug` `action` (`session` `title` `interviewer`) | "jiyoon 인터뷰 시작, 제목 결제 갭, 진행자 김후임" |
-| 합동 회의 | `/mcp__afterglow__council` | `slugs` `question` | "jiyoon,jaehoon 모아서 회의" |
-| 내보내기 | `/mcp__afterglow__export` | `slugs` 또는 `all` | "jiyoon 내보내줘" |
-| 가져오기 | `/mcp__afterglow__import` | `input` (`expectAnchor`) | "이 번들 가져와줘: ./afterglow-export-…/" |
-| 정리 | `/mcp__afterglow__gc` | `action` (`slug` `apply`) | "오래된 스냅샷 정리 미리보기" |
-| 재활성화 | `/mcp__afterglow__resume` | `slug` | "jiyoon 다시 활성화" |
+| `afterglow:init` | (없음) | `~/.claude/afterglow/` 부트스트랩 | `afterglow:init` |
+| `afterglow:create` | `slug` `name` `role` (`tenure` `bio`) | 에이전트 폴더 생성 (draft) | `create → slug:jiyoon, name:이지윤, role:프로덕트 디자이너` |
+| `afterglow:sign` | `slug` `signer` | 동의 서명 → active | `sign → slug:jiyoon, signer:이지윤` |
+| `afterglow:resume` | `slug` | paused/draft 를 active 로 | `resume → slug:jiyoon` |
+| `afterglow:archive` | `action`(archive\|restore\|list) (`slug`) | 보관/복원/목록 | `archive → action:archive, slug:jiyoon` |
 
-**예시 흐름** (슬래시):
+#### 일상
+| 명령 | 인자 | 설명 | 예시 |
+| --- | --- | --- | --- |
+| `afterglow:list` | (`status`) | 에이전트 목록 | `list` / `list → status:active` |
+| `afterglow:status` | (없음) | 전체 대시보드 | `status` |
+| `afterglow:inspect` | `slug` | 한 에이전트 상세 | `inspect → slug:jiyoon` |
+| `afterglow:ask` | `slug` `question` | 페르소나로 질문 | `ask → slug:jiyoon, question:온보딩 이탈 어떻게 줄였어요?` |
+| `afterglow:edit` | `slug` (`bio` `name` `role` / `open` / `revalidate`) | 수정 (필드 / 에디터 열기 / 재검증) | `edit → slug:jiyoon, open:true` |
+| `afterglow:history` | `slug` (`filter` `limit`) | 대화/이벤트 로그 | `history → slug:jiyoon, filter:결제` |
+
+#### 운영 · 신뢰 · 권한 · 감사
+| 명령 | 인자 | 설명 | 예시 |
+| --- | --- | --- | --- |
+| `afterglow:correct` | `slug` `action`(feedback\|edit-answer\|save-rule\|list) (`feedback` `recordId`) | 수동 보정 | `correct → slug:jiyoon, action:feedback, feedback:정산은 주1회` |
+| `afterglow:recalibrate` | `slug` (`byTopic` `apply`) | 신뢰도 자동 보정 | `recalibrate → slug:jiyoon, apply:true` |
+| `afterglow:access` | `slug` `action`(list\|allow\|deny\|remove\|set-default\|check) (`rule` `caller`) | 호출 권한 정책 | `access → slug:jiyoon, action:allow, rule:user:ykhyun` |
+| `afterglow:audit` | (`slug` `fast` `checkpoint`) | 감사 로그 + 무결성 검증 | `audit → checkpoint:true` |
+| `afterglow:version` | `slug` `action`(list\|diff\|rollback\|tag\|snapshot) (`versionA` `tag`) | 버전 히스토리 | `version → slug:jiyoon, action:rollback, versionA:v3` |
+| `afterglow:gc` | `action`(list\|prune-versions\|purge-media\|purge-archive) (`slug` `apply`) | 보존/정리 (기본 dry-run) | `gc → action:prune-versions, slug:jiyoon` |
+
+#### 인터뷰 · 회의
+| 명령 | 인자 | 설명 | 예시 |
+| --- | --- | --- | --- |
+| `afterglow:handoff` | `slug` `action`(start\|review\|status\|finalize\|abort) (`signer`) | 본인 인계 셀프 검수 | `handoff → slug:jiyoon, action:start` |
+| `afterglow:interview` | `slug` `action`(start\|add-question\|answer\|gap-check\|suggest-questions\|attach\|review\|annotate\|status\|list\|inspect\|finalize\|abort\|transcribe) (`session` `title` `interviewer`) | 인계자 주도 다중 인터뷰 | `interview → slug:jiyoon, action:start, title:결제 갭, interviewer:김후임` |
+| `afterglow:council` | `slugs` `question` | 합동 회의 | `council → slugs:jiyoon,jaehoon, question:온보딩이 결제에 영향?` |
+| `afterglow:council-summary` | (`file`) | 회의록 자동 요약 | `council-summary` |
+
+#### 이식 (핫플러그)
+| 명령 | 인자 | 설명 | 예시 |
+| --- | --- | --- | --- |
+| `afterglow:export` | (`slugs` `all`) | 에이전트 번들 내보내기 | `export → slugs:jiyoon,jaehoon` / `export → all:true` |
+| `afterglow:import` | `input` (`expectAnchor`) | 번들/폴더 가져오기 | `import → input:./afterglow-export-…/, expectAnchor:sha256:…` |
+| `afterglow:verify` | `input` | import 전 읽기전용 검증 | `verify → input:./afterglow-export-…/` |
+
+**예시 흐름:**
 ```text
-/mcp__afterglow__init
-/mcp__afterglow__create     → slug: jiyoon · name: 이지윤 · role: 프로덕트 디자이너
-/mcp__afterglow__sign       → slug: jiyoon · signer: 이지윤
-/mcp__afterglow__ask        → slug: jiyoon · question: 온보딩 step 3 이탈 어떻게 줄였어요?
-/mcp__afterglow__interview  → slug: jiyoon · action: start · title: 결제 갭 · interviewer: 김후임
+afterglow:init                        ⇥  /mcp__afterglow__init
+afterglow:create   → slug:jiyoon, name:이지윤, role:프로덕트 디자이너
+afterglow:sign     → slug:jiyoon, signer:이지윤
+afterglow:ask      → slug:jiyoon, question:온보딩 step 3 이탈 어떻게 줄였어요?
+afterglow:interview→ slug:jiyoon, action:start, title:결제 갭, interviewer:김후임
 ```
 
-> 인자가 많은 도구(예: interview 의 attach·answer)는 자연어가 더 편할 수 있어요. 슬래시는 자주 쓰는 진입점(init·create·ask·status 등)에 특히 유용합니다.
-
 **수정(edit) 3가지 방식:**
-- **필드 직접**: `/mcp__afterglow__edit` → `slug` + `bio`/`name`/`role` 등 (구조적 patch, 자동 검증 + system-prompt 재생성 + 스냅샷)
-- **에디터로 열기**: `open=true` → `persona.json` 경로를 안내 + 백업 스냅샷 생성. `vim`/`code` 등으로 직접 열어 수정
-- **재검증**: 직접 수정 후 `revalidate=true` → 수정한 `persona.json` 을 검증(실패 시 미반영) + `system-prompt.md` 재생성 + 스냅샷
-  ```text
-  /mcp__afterglow__edit  (slug: jiyoon, open: true)        → persona.json 경로 안내
-  # vim ~/.claude/afterglow/agents/jiyoon/persona.json     → 직접 수정·저장
-  /mcp__afterglow__edit  (slug: jiyoon, revalidate: true)  → 검증 + 재생성
-  ```
+- **필드 직접**: `afterglow:edit` → `slug` + `bio`/`name`/`role` (구조적 patch, 자동 검증 + system-prompt 재생성 + 스냅샷)
+- **에디터로 열기**: `open:true` → `persona.json` 경로 안내 + 백업 스냅샷 → `vim`/`code` 로 직접 수정
+- **재검증**: 직접 수정 후 `revalidate:true` → 수정한 `persona.json` 검증(실패 시 미반영) + `system-prompt.md` 재생성 + 스냅샷
 
 ## 📐 인터랙티브 제안서 (프론트)
 
@@ -439,7 +463,7 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 - [x] **import `--expectAnchor`** (번들 위변조 탐지) + **audit checkpoint/fast** (대용량 증분 검증)
 - [x] **BM25 RAG 랭킹** + opt-in **dense-vector 백엔드** (`AFTERGLOW_RAG_BACKEND=dense` · embeddings/ 캐시 · 실패 시 렉시컬 fallback)
 - [x] **whisper 모델 관리** (`transcribe --download/--list-models` + 자동 해석)
-- [x] **슬래시 명령** `/mcp__afterglow__<이름>` — MCP prompt 15종(edit 포함)으로 입력창에서 직접 호출
+- [x] **슬래시 명령** `/mcp__afterglow__<이름>` — MCP prompt 24종(도구 전부)으로 `afterglow:` 입력→Tab 호출
 - [x] vitest 208개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 - [x] **핸즈온 Jupyter 노트북** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — 초보자용 전 기능 따라하기
