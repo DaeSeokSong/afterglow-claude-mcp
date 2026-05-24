@@ -15,12 +15,14 @@ import {
   appendHistory,
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const gcShape = {
   action: z
     .enum(['list', 'prune-versions', 'purge-media', 'purge-archive'])
-    .describe('list(미리보기) | prune-versions(오래된 스냅샷 정리·태그 보존) | purge-media(미디어 원본 삭제·전사본 유지) | purge-archive(보관함 영구 삭제).'),
+    .optional()
+    .describe('(필수) list(미리보기) | prune-versions(오래된 스냅샷 정리·태그 보존) | purge-media(미디어 원본 삭제·전사본 유지) | purge-archive(보관함 영구 삭제).'),
   slug: z.string().optional().describe('대상 에이전트. 생략 시 prune-versions/purge-archive 는 전체 적용.'),
   keep: z.number().int().min(0).max(1000).optional().describe('prune-versions 시 보존할 최신 스냅샷 수 (기본 10). 태그된 버전은 항상 보존.'),
   days: z.number().int().min(0).max(3650).optional().describe('purge-archive 시 N일 이상 지난 것만 (기본 0 = 전부).'),
@@ -38,6 +40,12 @@ interface GcArgs {
 export async function runGc(args: GcArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('gc', args as unknown as Record<string, unknown>, [
+      { name: 'action', required: true, label: '동작', enumValues: ['list', 'prune-versions', 'purge-media', 'purge-archive'] },
+      { name: 'slug', required: args.action === 'purge-media', label: '대상 에이전트 (purge-media 필수, 그 외 생략 시 전체)', candidates: slugCandidates, example: 'jiyoon' },
+      { name: 'apply', required: false, label: '실제 적용 (기본 dry-run)' },
+    ]);
+    if (ask) return ask;
     const apply = !!args.apply;
 
     switch (args.action) {

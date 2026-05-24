@@ -14,6 +14,7 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { sanitisePromptLine } from '../sanitize.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 /**
@@ -32,8 +33,9 @@ const VERSION_ID_PATTERN = /^v\d{1,9}$/;
 export const versionShape = {
   action: z
     .enum(['list', 'diff', 'rollback', 'tag', 'snapshot'])
-    .describe('list | diff | rollback | tag | snapshot.'),
-  slug: z.string().min(1).describe('대상 에이전트 slug.'),
+    .optional()
+    .describe('(필수) list | diff | rollback | tag | snapshot.'),
+  slug: z.string().min(1).optional().describe('(필수) 대상 에이전트 slug. 생략 시 안내합니다.'),
   versionA: z
     .string()
     .max(80)
@@ -68,6 +70,13 @@ interface VersionArgs {
 export async function runVersion(args: VersionArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('version', args as unknown as Record<string, unknown>, [
+      { name: 'slug', required: true, label: '버전을 관리할 에이전트', candidates: slugCandidates, example: 'jiyoon' },
+      { name: 'action', required: true, label: '동작', enumValues: ['list', 'diff', 'rollback', 'tag', 'snapshot'] },
+      { name: 'versionA', required: false, label: '대상 버전 id (예: v3)' },
+      { name: 'tag', required: false, label: '태그 이름' },
+    ]);
+    if (ask) return ask;
     // Registry-aware existence — works even after archiveAgent moves the
     // folder out of agents/<slug>/.
     try {

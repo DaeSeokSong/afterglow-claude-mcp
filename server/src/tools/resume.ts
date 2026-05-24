@@ -6,10 +6,11 @@ import {
   resumeAgent,
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const resumeShape = {
-  slug: z.string().min(1).describe('재활성화할 에이전트 slug.'),
+  slug: z.string().min(1).optional().describe('(필수) 재활성화할 에이전트 slug. 생략 시 안내합니다.'),
 } as const;
 
 interface ResumeArgs {
@@ -32,6 +33,10 @@ interface ResumeArgs {
 export async function runResume(args: ResumeArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('resume', args as unknown as Record<string, unknown>, [
+      { name: 'slug', required: true, label: '재개할 에이전트 (paused/draft→active)', candidates: slugCandidates, example: 'jiyoon' },
+    ]);
+    if (ask) return ask;
     // getStatus reads the registry, so it correctly throws AgentNotFoundError
     // when there's no entry — even for archived agents whose folder is gone
     // from agents/<slug>/ (path-based agentExists would mis-report not-found).

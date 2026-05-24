@@ -119,48 +119,74 @@ See [`server/README.md`](./server/README.md) for the full tool reference.
 >
 > The `claude /afterglow …` notation in this README is shorthand for readability; in practice use one of the two ways above.
 
-### ⌨ Slash-command examples (`/mcp__afterglow__*`)
+### ⌨ Slash commands — type `afterglow:` to use them (24)
 
-Type `/mcp__afterglow__` in Claude Code's prompt box → an autocomplete list appears; pick one and it asks for the arguments. (Parenthesized args are optional.)
+**How to invoke:**
+1. Type **`afterglow:`** in the prompt box → a command list appears.
+2. Arrow-select the one you want → **Tab**.
+3. It becomes **`/mcp__afterglow__<name>`** with **grey hints** for the arguments — fill them in and run.
 
-| Goal | Slash command | Arguments | Natural-language alternative |
+> `afterglow:init` ⇥ `/mcp__afterglow__init` is a 1:1 mapping (`afterglow:` = what you type to find it, `/mcp__afterglow__` = the resolved form). Natural language ("initialize afterglow") works identically. Tools with many arguments (interview `attach`/`answer`, …) are often easier in natural language.
+
+> **🧭 You don't have to fill args in — missing required ones are guided.** Run a tool with a required arg omitted and it returns **numbered choices + help** instead of erroring: e.g. just `afterglow:ask` → "①jiyoon ②jaehoon … ③type your own", and each argument is tagged **`[필수]`(required) / `[선택]`(optional)**. (The `(parens)` in the tables below also mark optional args.)
+
+#### Setup · sign · archive
+| Command | Args (parens = optional) | What | Example |
 | --- | --- | --- | --- |
-| Initialize | `/mcp__afterglow__init` | (none) | "initialize afterglow" |
-| Create agent | `/mcp__afterglow__create` | `slug` `name` `role` (`tenure` `bio`) | "create agent jiyoon, Jiyoon Lee, product designer" |
-| Sign → active | `/mcp__afterglow__sign` | `slug` `signer` | "sign jiyoon as Jiyoon Lee" |
-| List | `/mcp__afterglow__list` | (`status`) | "show afterglow list" |
-| Dashboard | `/mcp__afterglow__status` | (none) | "afterglow status" |
-| Inspect | `/mcp__afterglow__inspect` | `slug` | "inspect jiyoon" |
-| Ask | `/mcp__afterglow__ask` | `slug` `question` | "ask jiyoon how the payment fallback worked" |
-| Edit | `/mcp__afterglow__edit` | `slug` (`bio` `name` `role` / `open` / `revalidate`) | "change jiyoon's bio to …" |
-| Self-handoff | `/mcp__afterglow__handoff` | `slug` `action` (`signer`) | "start a handoff for jiyoon" |
-| Interview | `/mcp__afterglow__interview` | `slug` `action` (`session` `title` `interviewer`) | "start an interview for jiyoon, title Payment gaps, interviewer J. Kim" |
-| Council | `/mcp__afterglow__council` | `slugs` `question` | "convene jiyoon and jaehoon" |
-| Export | `/mcp__afterglow__export` | `slugs` or `all` | "export jiyoon" |
-| Import | `/mcp__afterglow__import` | `input` (`expectAnchor`) | "import this bundle: ./afterglow-export-…/" |
-| GC / retention | `/mcp__afterglow__gc` | `action` (`slug` `apply`) | "preview pruning old snapshots" |
-| Resume | `/mcp__afterglow__resume` | `slug` | "resume jiyoon" |
+| `afterglow:init` | (none) | bootstrap `~/.claude/afterglow/` | `afterglow:init` |
+| `afterglow:create` | `slug` `name` `role` (`tenure` `bio`) | create an agent (draft) | `create → slug:jiyoon, name:Jiyoon Lee, role:Product Designer` |
+| `afterglow:sign` | `slug` `signer` | sign consent → active | `sign → slug:jiyoon, signer:Jiyoon Lee` |
+| `afterglow:resume` | `slug` | paused/draft → active | `resume → slug:jiyoon` |
+| `afterglow:archive` | `action`(archive\|restore\|list) (`slug`) | archive / restore / list | `archive → action:archive, slug:jiyoon` |
 
-**Example flow** (slash):
+#### Daily
+| Command | Args | What | Example |
+| --- | --- | --- | --- |
+| `afterglow:list` | (`status`) | list agents | `list` / `list → status:active` |
+| `afterglow:status` | (none) | global dashboard | `status` |
+| `afterglow:inspect` | `slug` | one agent in detail | `inspect → slug:jiyoon` |
+| `afterglow:ask` | `slug` `question` | ask the persona | `ask → slug:jiyoon, question:how did you cut onboarding drop-off?` |
+| `afterglow:edit` | `slug` (`bio` `name` `role` / `open` / `revalidate`) | edit (fields / open in editor / revalidate) | `edit → slug:jiyoon, open:true` |
+| `afterglow:history` | `slug` (`filter` `limit`) | event/conversation log | `history → slug:jiyoon, filter:payment` |
+
+#### Ops · trust · access · audit
+| Command | Args | What | Example |
+| --- | --- | --- | --- |
+| `afterglow:correct` | `slug` `action`(feedback\|edit-answer\|save-rule\|list) (`feedback` `recordId`) | manual correction | `correct → slug:jiyoon, action:feedback, feedback:settlement is weekly` |
+| `afterglow:recalibrate` | `slug` (`byTopic` `apply`) | auto-recalibrate confidence | `recalibrate → slug:jiyoon, apply:true` |
+| `afterglow:access` | `slug` `action`(list\|allow\|deny\|remove\|set-default\|check) (`rule` `caller`) | call-permission policy | `access → slug:jiyoon, action:allow, rule:user:ykhyun` |
+| `afterglow:audit` | (`slug` `fast` `checkpoint`) | audit log + integrity verify | `audit → checkpoint:true` |
+| `afterglow:version` | `slug` `action`(list\|diff\|rollback\|tag\|snapshot) (`versionA` `tag`) | persona version history | `version → slug:jiyoon, action:rollback, versionA:v3` |
+| `afterglow:gc` | `action`(list\|prune-versions\|purge-media\|purge-archive) (`slug` `apply`) | retention/cleanup (dry-run default) | `gc → action:prune-versions, slug:jiyoon` |
+
+#### Interview · council
+| Command | Args | What | Example |
+| --- | --- | --- | --- |
+| `afterglow:handoff` | `slug` `action`(start\|review\|status\|finalize\|abort) (`signer`) | self-review handoff | `handoff → slug:jiyoon, action:start` |
+| `afterglow:interview` | `slug` `action`(start\|add-question\|answer\|gap-check\|suggest-questions\|attach\|review\|annotate\|status\|list\|inspect\|finalize\|abort\|transcribe) (`session` `title` `interviewer`) | successor-driven interviews | `interview → slug:jiyoon, action:start, title:Payment gaps, interviewer:J. Kim` |
+| `afterglow:council` | `slugs` `question` | multi-agent council | `council → slugs:jiyoon,jaehoon, question:does onboarding affect payments?` |
+| `afterglow:council-summary` | (`file`) | auto-summarize a transcript | `council-summary` |
+
+#### Portable (hot-plug)
+| Command | Args | What | Example |
+| --- | --- | --- | --- |
+| `afterglow:export` | (`slugs` `all`) | export an agent bundle | `export → slugs:jiyoon,jaehoon` / `export → all:true` |
+| `afterglow:import` | `input` (`expectAnchor`) | import a bundle/folder | `import → input:./afterglow-export-…/, expectAnchor:sha256:…` |
+| `afterglow:verify` | `input` | read-only pre-import check | `verify → input:./afterglow-export-…/` |
+
+**Example flow:**
 ```text
-/mcp__afterglow__init
-/mcp__afterglow__create     → slug: jiyoon · name: Jiyoon Lee · role: Product Designer
-/mcp__afterglow__sign       → slug: jiyoon · signer: Jiyoon Lee
-/mcp__afterglow__ask        → slug: jiyoon · question: how did you cut step-3 drop-off?
-/mcp__afterglow__interview  → slug: jiyoon · action: start · title: Payment gaps · interviewer: J. Kim
+afterglow:init                        ⇥  /mcp__afterglow__init
+afterglow:create   → slug:jiyoon, name:Jiyoon Lee, role:Product Designer
+afterglow:sign     → slug:jiyoon, signer:Jiyoon Lee
+afterglow:ask      → slug:jiyoon, question:how did you cut step-3 drop-off?
+afterglow:interview→ slug:jiyoon, action:start, title:Payment gaps, interviewer:J. Kim
 ```
 
-> Tools with many arguments (e.g. interview `attach`/`answer`) are often easier in natural language. Slash commands shine for the frequent entry points (init, create, ask, status, …).
-
 **Three ways to edit:**
-- **Fields directly**: `/mcp__afterglow__edit` → `slug` + `bio`/`name`/`role` (structured patch, auto-validated + system-prompt regenerated + snapshot)
-- **Open in an editor**: `open=true` → prints the `persona.json` path + makes a backup snapshot. Open it in `vim`/`code`/… and edit raw
-- **Revalidate**: after editing, `revalidate=true` → validates your edited `persona.json` (rejects + keeps the file if invalid) + regenerates `system-prompt.md` + snapshot
-  ```text
-  /mcp__afterglow__edit  (slug: jiyoon, open: true)        → prints persona.json path
-  # vim ~/.claude/afterglow/agents/jiyoon/persona.json     → edit & save
-  /mcp__afterglow__edit  (slug: jiyoon, revalidate: true)  → validate + regenerate
-  ```
+- **Fields directly**: `afterglow:edit` → `slug` + `bio`/`name`/`role` (structured patch, auto-validated + system-prompt regenerated + snapshot)
+- **Open in an editor**: `open:true` → prints the `persona.json` path + a backup snapshot → edit raw in `vim`/`code`
+- **Revalidate**: after editing, `revalidate:true` → validates the edited `persona.json` (rejects + keeps it if invalid) + regenerates `system-prompt.md` + snapshot
 
 ## 📐 Interactive proposal (frontend)
 
@@ -340,10 +366,10 @@ Afterglow/
 │  │  ├─ persona.ts        ← zod schema + system-prompt rendering
 │  │  ├─ interview.ts      ← interview/attachment/signature/provenance schema
 │  │  ├─ portable.ts       ← bundle manifest + folder hash + injection scan
-│  │  ├─ rag.ts            ← TF-IDF retrieval (knowledge/ + interview transcripts)
+│  │  ├─ rag.ts            ← BM25 / dense / hybrid retrieval (knowledge/ + interview transcripts)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 22 tools: …18 above… + interview · export · import · verify
-│  └─ test/                ← 208 vitest + stdio handshake (covers all 24 tools)
+│  └─ test/                ← 261 vitest + stdio handshake (covers all 24 tools)
 │
 └─ docs/
    └─ design-source/       ← original claude.ai/design hand-off (JSX) — reference
@@ -396,7 +422,7 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 208 vitest tests
+npm test             # 261 vitest tests
 npm run test:stdio   # real MCP stdio handshake (all 24 tools + v0.3/v0.4 round-trips)
 npm run test:all     # unit → build → stdio
 ```
@@ -415,14 +441,15 @@ Afterglow v0.2.0 is a **proof of concept**. Things to know before pulling it int
 | **GDPR delete** | `archive` only moves to `archive/<slug>/` — not real deletion | After retention window, manual `rm -rf` + registry edit |
 | **Multi-process** | In-process locks only — assumes one stdio server | Externalise to Redis/DB mutex for distributed runs |
 | **Side-log integrity** | Only `audit.log` is hash-chained — `history.log` / `consent.md` etc are plain text | Hash sibling files into audit `meta` for full coverage |
-| **Media transcription** | Tier 0 only (bring-your-own transcript) — no built-in speech-to-text | Opt-in local whisper.cpp (Tier 1) / external STT API (Tier 2) |
+| **Media transcription** | WASM whisper (Tier 1a, `@xenova/transformers` optionalDependency) / local whisper.cpp (Tier 1b) / bring-your-own transcript (Tier 0); model downloads once on first use | Larger model or external STT (Tier 2) when accuracy matters |
+| **PII · encryption** | Transcript-only PII masking (`AFTERGLOW_PII_REDACT=1`) + at-rest encryption (`AFTERGLOW_ENCRYPTION_KEY`, AES-256-GCM) — off by default | Scrub/encrypt user-dropped knowledge files before ingest |
 | **Import trust** | Name-string match + folder hash + injection scan (PoC) | Tie to signer PKI / corporate ID verification |
 
 These are deliberate PoC trade-offs; closing them is a separate exercise for any operational deployment.
 
 ## 🗺 Roadmap
 
-### Now (v0.3.0)
+### Now (v0.8.0)
 - [x] 18-screen interactive proposal (Vite + React 19 + TS)
 - [x] Cmd+K palette + keyboard shortcuts + cross-screen click navigation
 - [x] All 24 MCP tools (`init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · **`interview`** · **`export`** · **`import`** · **`verify`** · **`status`** · **`gc`**)
@@ -439,15 +466,20 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 - [x] **Transcription** (`interview transcribe` — local whisper `--apply` / Claude polish `--text`) + **pre-interview question suggestions** (`suggest-questions`) + **review-then-index** (`review`)
 - [x] **import `--expectAnchor`** (bundle-tamper detection) + **audit checkpoint/fast** (incremental verification for large logs)
 - [x] **BM25 ranking** + opt-in **dense-vector backend** (`AFTERGLOW_RAG_BACKEND=dense` · embeddings/ cache · transparent lexical fallback)
+- [x] **Hybrid RAG reranking** — RRF (Reciprocal Rank Fusion) of dense + lexical (on by default when dense is active; `AFTERGLOW_RAG_HYBRID=off` to disable)
+- [x] **WASM whisper engine** (`transcribe --apply`) — `@xenova/transformers` optionalDependency, no native build; `AFTERGLOW_WHISPER_ENGINE=auto` (WASM→native) · model auto-downloads on first use · whisper.cpp binary tier as fallback
 - [x] **whisper model management** (`transcribe --download/--list-models` + auto-resolution)
-- [x] **Slash commands** `/mcp__afterglow__<name>` — 15 MCP prompts (incl. edit) callable straight from the prompt box
-- [x] 208 vitest + extended stdio handshake (covers all 24 tools + prompts)
+- [x] **PII masking + at-rest encryption** — transcript-only email/phone/RRN/card/token masking (`AFTERGLOW_PII_REDACT=1`) + AES-256-GCM (`AFTERGLOW_ENCRYPTION_KEY`); RAG decrypts transparently so search still works
+- [x] **Auto question-suggestion on new interview** — `interview start` embeds a 4-signal gap analysis and asks "proceed with these questions?" (disable with `suggest=false`)
+- [x] **Missing-argument elicitation** — omit a required arg and the tool returns numbered choices (+ "type your own") with `[필수]`/`[선택]` tags; candidates are dynamic (existing slugs · action enums · session ids · pending question ids)
+- [x] **Slash commands** `/mcp__afterglow__<name>` — 24 MCP prompts (one per tool) — type `afterglow:` → Tab to invoke
+- [x] 261 vitest + extended stdio handshake (covers all 24 tools + prompts)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 - [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
 
 ### Next
-- [ ] Bundled whisper.cpp WASM engine (fully automatic incl. model lazy-download)
 - [ ] per-tool ACL · scheduled retention · Web companion
+- [ ] Bulk encrypt/decrypt tool extending to knowledge files · external STT (Tier 2) adapter
 
 [Issues & PRs welcome](https://github.com/DaeSeokSong/Afterglow/issues/new).
 

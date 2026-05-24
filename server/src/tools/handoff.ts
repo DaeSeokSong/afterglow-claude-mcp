@@ -25,6 +25,7 @@ import {
 import { append as auditAppend } from '../audit.js';
 import { PersonaSchema, renderSystemPrompt } from '../persona.js';
 import { sanitisePromptLine, sanitisePromptText } from '../sanitize.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 /* --------------------------------------------------------------- */
@@ -45,8 +46,9 @@ const ReviewItemSchema = z
 export const handoffShape = {
   action: z
     .enum(['start', 'review', 'status', 'finalize', 'abort'])
-    .describe('start | review | status | finalize | abort.'),
-  slug: z.string().min(1).describe('대상 에이전트 slug.'),
+    .optional()
+    .describe('(필수) start | review | status | finalize | abort.'),
+  slug: z.string().min(1).optional().describe('(필수) 대상 에이전트 slug. 생략 시 안내합니다.'),
 
   /* start */
   limit: z
@@ -160,6 +162,12 @@ const sanitiseHandoffText = sanitisePromptText;
 export async function runHandoff(args: HandoffArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('handoff', args as unknown as Record<string, unknown>, [
+      { name: 'slug', required: true, label: '셀프 인계 검수할 에이전트', candidates: slugCandidates, example: 'jiyoon' },
+      { name: 'action', required: true, label: '동작', enumValues: ['start', 'review', 'status', 'finalize', 'abort'] },
+      { name: 'signer', required: false, label: 'finalize 시 본인 서명자' },
+    ]);
+    if (ask) return ask;
     // Registry-aware existence: covers archived agents whose folder has been
     // moved out of agents/<slug>/ but whose entry still lives in registry.json.
     try {

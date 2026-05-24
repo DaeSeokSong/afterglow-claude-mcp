@@ -207,4 +207,125 @@ export function registerPrompts(server: McpServer): void {
     },
     async ({ action, slug, apply }) => ask(`Afterglow \`afterglow_gc\` 도구를 호출해줘: ${kv({ action, slug, apply })}`),
   );
+
+  /* ---- remaining tools (complete coverage) ---- */
+  server.registerPrompt(
+    'verify',
+    {
+      title: 'Afterglow: 번들 검증',
+      description: 'import 전 읽기전용 사전 검증 (afterglow_verify)',
+      argsSchema: { input: z.string().describe('번들 또는 에이전트 폴더 경로') },
+    },
+    async ({ input }) => ask(`Afterglow \`afterglow_verify\` 도구를 호출해줘: ${kv({ input })}`),
+  );
+
+  server.registerPrompt(
+    'archive',
+    {
+      title: 'Afterglow: 보관/복원',
+      description: '에이전트 보관·복원·목록 (afterglow_archive)',
+      argsSchema: {
+        action: z.string().describe('archive | restore | list'),
+        slug: z.string().optional().describe('대상 slug (list 는 생략)'),
+      },
+    },
+    async ({ action, slug }) => ask(`Afterglow \`afterglow_archive\` 도구를 호출해줘: ${kv({ action, slug })}`),
+  );
+
+  server.registerPrompt(
+    'version',
+    {
+      title: 'Afterglow: 버전 관리',
+      description: 'persona 버전 히스토리·롤백·태그 (afterglow_version)',
+      argsSchema: {
+        slug: z.string().describe('대상 slug'),
+        action: z.string().describe('list | diff | rollback | tag | snapshot'),
+        versionA: z.string().optional().describe('diff/rollback/tag 대상 버전 id (예: v3)'),
+        tag: z.string().optional().describe('tag 액션의 태그 이름'),
+      },
+    },
+    async ({ slug, action, versionA, tag }) => ask(`Afterglow \`afterglow_version\` 도구를 호출해줘: ${kv({ slug, action, versionA, tag })}`),
+  );
+
+  server.registerPrompt(
+    'access',
+    {
+      title: 'Afterglow: 호출 권한',
+      description: 'user/role/team allow·deny 정책 (afterglow_access)',
+      argsSchema: {
+        slug: z.string().describe('대상 slug'),
+        action: z.string().describe('list | allow | deny | remove | set-default | check'),
+        rule: z.string().optional().describe('allow/deny/remove 시 규칙 (예: user:ykhyun)'),
+        caller: z.string().optional().describe('check 시 호출자 (예: user:ykhyun)'),
+      },
+    },
+    async ({ slug, action, rule, caller }) => ask(`Afterglow \`afterglow_access\` 도구를 호출해줘: ${kv({ slug, action, rule, caller })}`),
+  );
+
+  server.registerPrompt(
+    'correct',
+    {
+      title: 'Afterglow: 신뢰도 수동 보정',
+      description: 'ask 결과 피드백·답변편집·규칙저장 (afterglow_correct)',
+      argsSchema: {
+        slug: z.string().describe('대상 slug'),
+        action: z.string().describe('feedback | edit-answer | save-rule | list'),
+        feedback: z.string().optional().describe('피드백/규칙 본문'),
+        recordId: z.string().optional().describe('대상 ask 레코드 id (선택)'),
+      },
+    },
+    async ({ slug, action, feedback, recordId }) => ask(`Afterglow \`afterglow_correct\` 도구를 호출해줘: ${kv({ slug, action, feedback, recordId })}`),
+  );
+
+  server.registerPrompt(
+    'history',
+    {
+      title: 'Afterglow: 대화 로그',
+      description: 'history.log 필터 출력 (afterglow_history)',
+      argsSchema: {
+        slug: z.string().describe('대상 slug'),
+        filter: z.string().optional().describe('키워드 필터 (선택)'),
+        limit: z.string().optional().describe('표시 개수 (선택)'),
+      },
+    },
+    async ({ slug, filter, limit }) => ask(`Afterglow \`afterglow_history\` 도구를 호출해줘: ${kv({ slug, filter, limit })}`),
+  );
+
+  server.registerPrompt(
+    'audit',
+    {
+      title: 'Afterglow: 감사 로그',
+      description: 'hash-chained 감사 로그 + 무결성 검증 (afterglow_audit)',
+      argsSchema: {
+        slug: z.string().optional().describe('특정 에이전트만 필터 (선택)'),
+        fast: z.string().optional().describe('true 면 체크포인트 이후만 검증 (대용량)'),
+        checkpoint: z.string().optional().describe('true 면 체크포인트 기록'),
+      },
+    },
+    async ({ slug, fast, checkpoint }) => ask(`Afterglow \`afterglow_audit\` 도구를 호출해줘: ${kv({ slug, fast, checkpoint })}`),
+  );
+
+  server.registerPrompt(
+    'recalibrate',
+    {
+      title: 'Afterglow: 신뢰도 자동 보정',
+      description: 'history 분석 → confidenceFloor/peerAskThreshold 조정 (afterglow_recalibrate)',
+      argsSchema: {
+        slug: z.string().describe('대상 slug'),
+        byTopic: z.string().optional().describe('true 면 expertise별 진단 모드'),
+        apply: z.string().optional().describe('true 면 실제 적용 (기본 dry-run)'),
+      },
+    },
+    async ({ slug, byTopic, apply }) => ask(`Afterglow \`afterglow_recalibrate\` 도구를 호출해줘: ${kv({ slug, byTopic, apply })}`),
+  );
+
+  server.registerPrompt(
+    'council-summary',
+    {
+      title: 'Afterglow: 회의록 요약',
+      description: 'council 회의록 자동 요약 (afterglow_council_summary)',
+      argsSchema: { file: z.string().optional().describe('회의록 파일명 (생략 시 최근 회의록)') },
+    },
+    async ({ file }) => ask(`Afterglow \`afterglow_council_summary\` 도구를 호출해줘${file ? `: ${kv({ file })}` : ' (가장 최근 회의록).'}`),
+  );
 }

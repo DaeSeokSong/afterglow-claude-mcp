@@ -44,7 +44,13 @@
  *
  * `ask`, `council`, `interview gap-check` and `interview suggest-questions` do
  * NOT call an LLM. They return persona + RAG context so Claude in the user's
- * session composes the answer. RAG ranks with BM25 (or an opt-in dense backend).
+ * session composes the answer. RAG ranks with BM25, an opt-in dense backend, or
+ * (default when dense is on) a hybrid RRF fusion of both.
+ *
+ * v0.8 adds: a WASM whisper tier for `transcribe --apply` (no native build —
+ * @xenova/transformers optionalDependency), opt-in PII masking
+ * (AFTERGLOW_PII_REDACT) + encryption-at-rest (AFTERGLOW_ENCRYPTION_KEY) for
+ * transcripts, and auto question-suggestion on `interview start`.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -76,7 +82,7 @@ import { gcShape, runGc } from './tools/gc.js';
 import { registerPrompts } from './prompts.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.6.0';
+const SERVER_VERSION = '0.8.0';
 
 export function buildServer(): McpServer {
   const server = new McpServer(
@@ -374,9 +380,14 @@ export function buildServer(): McpServer {
  * un-handled rejections either.
  */
 function wrap<TArgs>(handler: (args: TArgs) => Promise<ToolReply>) {
-  return async (args: TArgs): Promise<ToolReply> => {
+  // Param typed `unknown` so the callback stays assignable to every tool's
+  // (now partly-optional) input schema. Required-arg enforcement + friendly
+  // elicitation happens inside each handler (tools/elicit.ts), not via zod —
+  // that's what lets a missing arg return a guided choice list instead of a
+  // raw SDK validation error.
+  return async (args: unknown): Promise<ToolReply> => {
     try {
-      return await handler(args);
+      return await handler(args as TArgs);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return errorReply(msg);

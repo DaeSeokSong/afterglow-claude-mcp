@@ -71,7 +71,7 @@ claude /afterglow ask jiyoon "온보딩 step 3 이탈, 어떻게 줄였어요?"
 >
 > 본 README 의 `claude /afterglow …` 표기는 약식이며, 실제로는 위 두 방식 중 하나로 씁니다.
 >
-> **슬래시 명령 15종** (입력창에서 `/mcp__afterglow__` 자동완성): `init` · `create`(slug,name,role) · `sign`(slug,signer) · `resume`(slug) · `list` · `status` · `inspect`(slug) · `ask`(slug,question) · `edit`(slug,bio/open/revalidate) · `handoff`(slug,action) · `interview`(slug,action) · `council`(slugs,question) · `export`(slugs|all) · `import`(input) · `gc`(action). 예: `/mcp__afterglow__ask` → slug=jiyoon, question="온보딩 이탈 어떻게 줄였어요?". 인자 많은 액션은 자연어가 편합니다.
+> **슬래시 명령 24종** — 입력창에 **`afterglow:`** 치면 목록 → 화살표 선택 → **Tab** → `/mcp__afterglow__<이름>` 으로 입력되고 회색 힌트로 인자 안내. 도구 24개 전부 1:1로 노출됩니다: `init` · `create` · `sign` · `resume` · `archive` · `list` · `status` · `inspect` · `ask` · `edit` · `history` · `correct` · `recalibrate` · `access` · `audit` · `version` · `gc` · `handoff` · `interview` · `council` · `council-summary` · `export` · `import` · `verify`. (명령별 인자·예시 표는 루트 [README](../README.md) 의 "슬래시 명령" 절 참고.) 자연어로도 동일하게 호출됩니다.
 
 ## 🪶 왜 만들었나
 
@@ -245,6 +245,8 @@ sequenceDiagram
 > v0.3 에서 <code>interview</code> 에 <b>suggest-questions</b>(회차 전 질문 제안) · <b>transcribe</b>(<code>--text</code> 폴리시 저장 / <code>--apply</code> 로컬 whisper) · <b>review</b>(검토 후 인덱싱) 액션이, <code>import</code> 에 <b>--expectAnchor</b>(번들 위변조 탐지), <code>audit</code> 에 <b>--checkpoint/--fast</b>(대용량 증분 검증)가 추가됐습니다.
 >
 > v0.4 에서 RAG 랭킹이 <b>BM25</b> 로 업그레이드(+ opt-in <b>dense-vector</b> 백엔드 `AFTERGLOW_RAG_BACKEND=dense`), <code>transcribe</code> 에 <b>--download/--list-models</b>(ggml 모델 관리)가 추가됐습니다.
+>
+> v0.8 에서 <b>WASM whisper 엔진</b>(<code>transcribe --apply</code>, `@xenova/transformers` optionalDependency — 네이티브 빌드 불필요), <b>하이브리드 RAG 재랭킹</b>(dense+lexical RRF 융합), 전사본 <b>PII 마스킹</b>(`AFTERGLOW_PII_REDACT=1`)·<b>저장 암호화</b>(`AFTERGLOW_ENCRYPTION_KEY`, AES-256-GCM), <code>interview start</code> 의 <b>자동 질문 제안</b>(진행 여부 자동 질의)이 추가됐습니다.
 
 <details>
 <summary><b>입력 스키마 자세히 보기</b></summary>
@@ -309,7 +311,7 @@ claude /afterglow interview jiyoon --action finalize --session 001-결제-fallba
 
 - **인터뷰이 부재**(이미 퇴사·연락 불가)면 `--action start --intervieweeAbsent` 로 **annotation(인계자 주석)** 모드. 단, 퇴사자가 handoff 단계에서 `--allowProxyAnnotation` 으로 사전 동의했어야 합니다. 주석은 "인계자 추정 ⚠(미확인)" 으로 신뢰도를 낮춰 반영됩니다.
 - **handoff → interview 브릿지**: `handoff finalize --allowFollowupInterview --allowProxyAnnotation --followupScope "결제·온보딩 한정"` 으로 본인이 미래 인터뷰를 사전 허용/제한할 수 있습니다.
-- **전사(transcription)**: 코어는 "추가 GPU·API 0원" 약속을 위해 직접 전사본 첨부(Tier 0)를 기본으로 합니다. `--action transcribe` 는 로컬 `whisper.cpp` 감지 안내 + Claude polish 가이드를 제공합니다 (외부 STT 는 옵트인).
+- **전사(transcription)**: 코어는 "추가 GPU·API 0원" 약속을 위해 STT 를 Tier 로 분리합니다 — 직접 전사본 첨부(Tier 0), **WASM whisper**(Tier 1a, `@xenova/transformers` optionalDependency · 네이티브 빌드 불필요), native `whisper.cpp`(Tier 1b), 외부 STT(Tier 2, 옵트인). `--action transcribe --apply` 는 `AFTERGLOW_WHISPER_ENGINE`(기본 `auto`=WASM→native)에 따라 실행하고, model 은 최초 1회 자동 다운로드합니다. 결과는 Claude polish(`--text`)로 다듬어 저장할 수 있습니다.
 
 ## 🔌 핫플러그 — export / import
 
@@ -395,6 +397,14 @@ import 가 자동으로 확인하는 것:
 | --- | --- | --- |
 | `AFTERGLOW_ROOT` | `~/.claude/afterglow` | 모든 데이터의 루트. 테스트 / dev 환경 격리 시 임시 폴더 지정. |
 | `AFTERGLOW_ALLOW_DRAFT` | unset | `1` 로 설정 시 `ask` / `council`의 active 게이트 우회. 테스트/디버그 전용. |
+| `AFTERGLOW_RAG_BACKEND` | `lexical` | `dense` 로 설정 시 임베딩 백엔드 사용 (`AFTERGLOW_EMBED_ENDPOINT` 필요, 실패 시 lexical 폴백). |
+| `AFTERGLOW_RAG_HYBRID` | on (dense 일 때) | `off` 로 설정 시 dense 단독. 기본은 dense + lexical 의 **RRF 하이브리드 재랭킹**. |
+| `AFTERGLOW_EMBED_ENDPOINT` / `AFTERGLOW_EMBED_KEY` / `AFTERGLOW_EMBED_MODEL` | unset / unset / `text-embedding-3-small` | OpenAI 호환 `/embeddings` 엔드포인트·키·모델 (dense 백엔드). |
+| `AFTERGLOW_WHISPER_ENGINE` | `auto` | `transcribe --apply` 엔진: `auto`(WASM→native) · `wasm` · `binary` · `off`. |
+| `AFTERGLOW_WHISPER_WASM_MODULE` | unset | WASM 전사 모듈 specifier override (`transcribe(req)=>Promise<string>` 계약). 미설정 시 `@xenova/transformers`(optionalDependency) 사용. |
+| `AFTERGLOW_WHISPER_MODEL` / `AFTERGLOW_WHISPER_MODEL_BASEURL` | unset / whisper.cpp HF repo | native whisper 모델 경로 / 모델 다운로드 base URL. |
+| `AFTERGLOW_PII_REDACT` | unset | `1` 로 설정 시 전사본 저장 전 PII(이메일·전화·주민번호·카드·토큰) 마스킹. |
+| `AFTERGLOW_ENCRYPTION_KEY` | unset | 설정 시 전사본을 AES-256-GCM(scrypt KDF)으로 저장 암호화. RAG 는 투명 복호화. |
 
 ## 🧑‍💻 Development
 
@@ -403,7 +413,7 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (208 tests — +integration 6 +v03 9, etc.)
+npm test                   # vitest (261 tests — +edge 24 +elicit 9 +v08 17, etc.)
 npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (24 도구 모두 happy-path + v0.3 기능 라운드트립)
 npm run test:all           # 전체 (unit → build → stdio)
 ```
@@ -483,7 +493,8 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 | **GDPR 삭제** | `archive` 는 `archive/<slug>/` 로 이동만 | 만료 후 수동 `rm -rf` + registry 정리 |
 | **다중 프로세스** | in-process lock 만 — 단일 stdio 서버 가정 | 분산 운영 시 외부 mutex (Redis/DB) |
 | **사이드 로그 무결성** | `audit.log` 만 해시 체인 | `history.log` / `consent.md` 등도 hash → audit meta |
-| **미디어 자동 전사** | Tier 0(직접 전사본 첨부)만 코어 내장 — 음성→텍스트 STT 미내장 | 로컬 whisper.cpp 번들(Tier 1) / 외부 STT API(Tier 2) 옵트인 |
+| **미디어 자동 전사** | WASM whisper(Tier 1a, optionalDependency) / native whisper.cpp(Tier 1b) / 직접 전사본(Tier 0) — model 최초 1회 다운로드 | 정확도 필요 시 large 모델 또는 외부 STT(Tier 2) |
+| **PII·암호화** | 전사본 한정 PII 마스킹(`AFTERGLOW_PII_REDACT`) + 저장 암호화(`AFTERGLOW_ENCRYPTION_KEY`) — 기본 off | knowledge 드롭 파일은 적재 전 직접 스크럽/암호화 |
 | **import 신뢰** | 이름 문자열 대조 + 폴더 해시 + 인젝션 스캔 (PoC) | 서명자 PKI / 사내 ID 검증과 묶어 사용 |
 
 ## 🗺 Roadmap
@@ -502,11 +513,16 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 - [x] **전사 `transcribe`**(로컬 whisper `--apply` / Claude polish `--text`) + **suggest-questions**(회차 전 질문 제안) + **review**(검토 후 인덱싱)
 - [x] **import `--expectAnchor`**(번들 위변조 탐지) + **audit checkpoint**(대용량 증분 검증)
 - [x] **BM25 RAG** + opt-in **dense-vector 백엔드** (`AFTERGLOW_RAG_BACKEND=dense`, embeddings/ 캐시)
+- [x] **하이브리드 RAG 재랭킹** — dense + lexical RRF 융합 (dense 일 때 기본 on, `AFTERGLOW_RAG_HYBRID=off`)
+- [x] **WASM whisper 엔진** `transcribe --apply` — `@xenova/transformers` optionalDependency (네이티브 빌드 불필요), `AFTERGLOW_WHISPER_ENGINE=auto`, native whisper.cpp 폴백
 - [x] **whisper 모델 관리** (`transcribe --download/--list-models` + 자동 해석)
-- [x] **MCP prompts → 슬래시 명령** `/mcp__afterglow__<이름>` (15종 — edit 포함, 입력창에서 직접 호출 + 인자 자동완성)
-- [x] vitest 208개 + 24 도구 stdio 핸드셰이크 (prompts 포함)
-- [ ] whisper.cpp WASM 엔진 번들 (모델 lazy-download 까지 완전 자동)
+- [x] **PII 마스킹 + 저장 암호화** — 전사본 한정 (`AFTERGLOW_PII_REDACT` / `AFTERGLOW_ENCRYPTION_KEY` AES-256-GCM), RAG 투명 복호화
+- [x] **신규 인터뷰 자동 질문 제안** — `interview start` 에 4-신호 갭 분석 + "진행할까요?" 자동 질문 동봉 (`suggest=false` 로 해제)
+- [x] **인자 자동 안내(elicitation)** — 필수 인자 누락 시 번호 선택지 + `[필수]`/`[선택]` 표기로 안내 (필수 인자 있는 도구 전체). 스키마는 optional + handler 에서 검증/안내
+- [x] **MCP prompts → 슬래시 명령** `/mcp__afterglow__<이름>` (24종 — 도구 전부 1:1, `afterglow:` 입력→Tab, 인자 자동완성)
+- [x] vitest 261개 + 24 도구 stdio 핸드셰이크 (prompts 포함)
 - [ ] per-tool ACL · Web companion · 정기 retention 자동화
+- [ ] knowledge 파일까지 확장한 일괄 암호화/복호화 도구 · 외부 STT(Tier 2) 어댑터
 
 [기여 환영](https://github.com/DaeSeokSong/Afterglow/issues/new) — 이슈 / PR / 사용 사례 모두 좋아요.
 

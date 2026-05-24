@@ -22,6 +22,7 @@ import {
   type Source,
   type Tone,
 } from '../persona.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 const TonePatchSchema = z
@@ -43,7 +44,7 @@ const AddSourceSchema = z
   .strict();
 
 export const editShape = {
-  slug: z.string().min(1).describe('수정할 에이전트 slug.'),
+  slug: z.string().min(1).optional().describe('(필수) 수정할 에이전트 slug. 생략 시 안내합니다.'),
 
   /* 기본 정보 */
   name: z.string().min(1).max(200).optional().describe('이름 변경.'),
@@ -137,6 +138,15 @@ interface Change {
 export async function runEdit(args: EditArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('edit', args as unknown as Record<string, unknown>, [
+      { name: 'slug', required: true, label: '수정할 에이전트', candidates: slugCandidates, example: 'jiyoon' },
+      { name: 'bio', required: false, label: '한 줄 소개 (필드 수정)' },
+      { name: 'name', required: false, label: '이름 (필드 수정)' },
+      { name: 'role', required: false, label: '직무 (필드 수정)' },
+      { name: 'open', required: false, label: 'vim/에디터로 열기' },
+      { name: 'revalidate', required: false, label: '직접 수정본 재검증' },
+    ]);
+    if (ask) return ask;
     try {
       await getStatus(args.slug); // registry-aware existence
     } catch (e) {

@@ -10,6 +10,7 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { sanitisePromptLine } from '../sanitize.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 // Mirrors the CALLER_PATTERN in ask.ts — both treat caller spec identically.
@@ -18,8 +19,9 @@ const CALLER_PATTERN = /^(user|role|team):[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 export const accessShape = {
   action: z
     .enum(['list', 'allow', 'deny', 'remove', 'set-default', 'check'])
-    .describe('list | allow | deny | remove | set-default | check.'),
-  slug: z.string().min(1).describe('대상 에이전트 slug.'),
+    .optional()
+    .describe('(필수) list | allow | deny | remove | set-default | check.'),
+  slug: z.string().min(1).optional().describe('(필수) 대상 에이전트 slug. 생략 시 안내합니다.'),
   rule: z
     .string()
     .optional()
@@ -61,6 +63,13 @@ function validateRule(rule: string | undefined): string | null {
 export async function runAccess(args: AccessArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('access', args as unknown as Record<string, unknown>, [
+      { name: 'slug', required: true, label: '권한 정책을 볼/바꿀 에이전트', candidates: slugCandidates, example: 'jiyoon' },
+      { name: 'action', required: true, label: '동작', enumValues: ['list', 'allow', 'deny', 'remove', 'set-default', 'check'] },
+      { name: 'rule', required: false, label: '규칙 (user:/role:/team:)' },
+      { name: 'caller', required: false, label: 'check 시 호출자' },
+    ]);
+    if (ask) return ask;
     try {
       await getStatus(args.slug); // registry-aware existence
     } catch (e) {

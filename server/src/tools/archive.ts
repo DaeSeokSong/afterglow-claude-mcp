@@ -10,12 +10,14 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { sanitisePromptLine } from '../sanitize.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const archiveShape = {
   action: z
     .enum(['archive', 'restore', 'list'])
-    .describe('archive | restore | list. list 는 보관함의 모든 슬러그를 표시.'),
+    .optional()
+    .describe('(필수) archive | restore | list. list 는 보관함의 모든 슬러그를 표시.'),
   slug: z
     .string()
     .min(1)
@@ -41,6 +43,12 @@ interface ArchiveArgs {
 export async function runArchive(args: ArchiveArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const needsSlug = args.action === 'archive' || args.action === 'restore';
+    const ask = await elicitMissing('archive', args as unknown as Record<string, unknown>, [
+      { name: 'action', required: true, label: '동작', enumValues: ['archive', 'restore', 'list'] },
+      { name: 'slug', required: needsSlug, label: '대상 에이전트 (archive/restore 시 필수)', candidates: slugCandidates, example: 'jiyoon' },
+    ]);
+    if (ask) return ask;
 
     if (args.action === 'list') {
       const slugs = await listArchivedSlugs();
