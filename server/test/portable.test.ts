@@ -332,13 +332,21 @@ describe('import · integrity + security', () => {
   it('verify reports symlinks and never writes', async () => {
     await bootstrapAndSign('jiyoon');
     const { knowledgeDir, agentDir } = await import('../src/storage.js');
-    // Plant a symlink inside the live agent's knowledge dir.
-    await symlink('/etc/hosts', join(knowledgeDir('jiyoon'), 'evil-link.md')).catch(() => {});
+    // Plant a symlink inside the live agent's knowledge dir. Creating symlinks
+    // needs admin/Developer-Mode on Windows, so guard it: if the OS refuses,
+    // skip the symlink-specific assertion (the detection feature can't be
+    // exercised without a real symlink) but still confirm verify runs cleanly.
+    let linked = true;
+    try {
+      await symlink('/etc/hosts', join(knowledgeDir('jiyoon'), 'evil-link.md'));
+    } catch {
+      linked = false;
+    }
 
     const { runVerify } = await import('../src/tools/verify.js');
     const v = await runVerify({ input: agentDir('jiyoon') });
     expect(v.isError).toBeUndefined();
-    expect(v.content[0].text).toMatch(/심볼릭 링크/);
+    if (linked) expect(v.content[0].text).toMatch(/심볼릭 링크/);
   });
 
   it('dryRun import validates without writing', async () => {
