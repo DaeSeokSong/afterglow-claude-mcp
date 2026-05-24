@@ -119,6 +119,38 @@ claude /afterglow ask jiyoon "..."
 >
 > 본 README 의 `claude /afterglow …` 표기는 가독성을 위한 약식이며, 실제로는 위 두 방식 중 하나로 쓰시면 됩니다.
 
+### ⌨ 슬래시 명령 예시 (`/mcp__afterglow__*`)
+
+Claude Code 입력창에 `/mcp__afterglow__` 까지 치면 자동완성 목록이 뜨고, 선택하면 인자 칸이 나옵니다. (괄호 인자는 선택)
+
+| 하고 싶은 것 | 슬래시 명령 | 채울 인자 | 자연어 대안 |
+| --- | --- | --- | --- |
+| 초기화 | `/mcp__afterglow__init` | (없음) | "afterglow 초기화해줘" |
+| 에이전트 생성 | `/mcp__afterglow__create` | `slug` `name` `role` (`tenure` `bio`) | "jiyoon 에이전트 만들어줘, 이지윤 프로덕트 디자이너" |
+| 서명 → active | `/mcp__afterglow__sign` | `slug` `signer` | "jiyoon 을 이지윤 이름으로 서명" |
+| 목록 | `/mcp__afterglow__list` | (`status`) | "afterglow 목록 보여줘" |
+| 전체 대시보드 | `/mcp__afterglow__status` | (없음) | "afterglow 상태 알려줘" |
+| 상세 보기 | `/mcp__afterglow__inspect` | `slug` | "jiyoon 상세 보여줘" |
+| 질문 | `/mcp__afterglow__ask` | `slug` `question` | "jiyoon 에게 결제 fallback 어떻게 했는지 물어봐" |
+| 본인 인계 | `/mcp__afterglow__handoff` | `slug` `action` (`signer`) | "jiyoon handoff start 해줘" |
+| 다중 인터뷰 | `/mcp__afterglow__interview` | `slug` `action` (`session` `title` `interviewer`) | "jiyoon 인터뷰 시작, 제목 결제 갭, 진행자 김후임" |
+| 합동 회의 | `/mcp__afterglow__council` | `slugs` `question` | "jiyoon,jaehoon 모아서 회의" |
+| 내보내기 | `/mcp__afterglow__export` | `slugs` 또는 `all` | "jiyoon 내보내줘" |
+| 가져오기 | `/mcp__afterglow__import` | `input` (`expectAnchor`) | "이 번들 가져와줘: ./afterglow-export-…/" |
+| 정리 | `/mcp__afterglow__gc` | `action` (`slug` `apply`) | "오래된 스냅샷 정리 미리보기" |
+| 재활성화 | `/mcp__afterglow__resume` | `slug` | "jiyoon 다시 활성화" |
+
+**예시 흐름** (슬래시):
+```text
+/mcp__afterglow__init
+/mcp__afterglow__create     → slug: jiyoon · name: 이지윤 · role: 프로덕트 디자이너
+/mcp__afterglow__sign       → slug: jiyoon · signer: 이지윤
+/mcp__afterglow__ask        → slug: jiyoon · question: 온보딩 step 3 이탈 어떻게 줄였어요?
+/mcp__afterglow__interview  → slug: jiyoon · action: start · title: 결제 갭 · interviewer: 김후임
+```
+
+> 인자가 많은 도구(예: interview 의 attach·answer)는 자연어가 더 편할 수 있어요. 슬래시는 자주 쓰는 진입점(init·create·ask·status 등)에 특히 유용합니다.
+
 ## 📐 인터랙티브 제안서 (프론트)
 
 전체 시스템을 어떻게 쓰는지 한 번에 둘러보는 18 개의 CLI 화면 모킹:

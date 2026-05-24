@@ -119,6 +119,38 @@ See [`server/README.md`](./server/README.md) for the full tool reference.
 >
 > The `claude /afterglow …` notation in this README is shorthand for readability; in practice use one of the two ways above.
 
+### ⌨ Slash-command examples (`/mcp__afterglow__*`)
+
+Type `/mcp__afterglow__` in Claude Code's prompt box → an autocomplete list appears; pick one and it asks for the arguments. (Parenthesized args are optional.)
+
+| Goal | Slash command | Arguments | Natural-language alternative |
+| --- | --- | --- | --- |
+| Initialize | `/mcp__afterglow__init` | (none) | "initialize afterglow" |
+| Create agent | `/mcp__afterglow__create` | `slug` `name` `role` (`tenure` `bio`) | "create agent jiyoon, Jiyoon Lee, product designer" |
+| Sign → active | `/mcp__afterglow__sign` | `slug` `signer` | "sign jiyoon as Jiyoon Lee" |
+| List | `/mcp__afterglow__list` | (`status`) | "show afterglow list" |
+| Dashboard | `/mcp__afterglow__status` | (none) | "afterglow status" |
+| Inspect | `/mcp__afterglow__inspect` | `slug` | "inspect jiyoon" |
+| Ask | `/mcp__afterglow__ask` | `slug` `question` | "ask jiyoon how the payment fallback worked" |
+| Self-handoff | `/mcp__afterglow__handoff` | `slug` `action` (`signer`) | "start a handoff for jiyoon" |
+| Interview | `/mcp__afterglow__interview` | `slug` `action` (`session` `title` `interviewer`) | "start an interview for jiyoon, title Payment gaps, interviewer J. Kim" |
+| Council | `/mcp__afterglow__council` | `slugs` `question` | "convene jiyoon and jaehoon" |
+| Export | `/mcp__afterglow__export` | `slugs` or `all` | "export jiyoon" |
+| Import | `/mcp__afterglow__import` | `input` (`expectAnchor`) | "import this bundle: ./afterglow-export-…/" |
+| GC / retention | `/mcp__afterglow__gc` | `action` (`slug` `apply`) | "preview pruning old snapshots" |
+| Resume | `/mcp__afterglow__resume` | `slug` | "resume jiyoon" |
+
+**Example flow** (slash):
+```text
+/mcp__afterglow__init
+/mcp__afterglow__create     → slug: jiyoon · name: Jiyoon Lee · role: Product Designer
+/mcp__afterglow__sign       → slug: jiyoon · signer: Jiyoon Lee
+/mcp__afterglow__ask        → slug: jiyoon · question: how did you cut step-3 drop-off?
+/mcp__afterglow__interview  → slug: jiyoon · action: start · title: Payment gaps · interviewer: J. Kim
+```
+
+> Tools with many arguments (e.g. interview `attach`/`answer`) are often easier in natural language. Slash commands shine for the frequent entry points (init, create, ask, status, …).
+
 ## 📐 Interactive proposal (frontend)
 
 18 CLI screen mock-ups that walk you through every command and edge case:

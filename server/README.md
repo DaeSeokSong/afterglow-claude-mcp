@@ -70,6 +70,8 @@ claude /afterglow ask jiyoon "온보딩 step 3 이탈, 어떻게 줄였어요?"
 > 2. **슬래시 명령**: Claude Code 입력창에서 **`/mcp__afterglow__<이름>`** (예: `/mcp__afterglow__init`) 직접 호출 + 인자 자동완성 — MCP prompt 로 노출됩니다 (형식이 `/afterglow init` 이 아니라 `/mcp__afterglow__init`).
 >
 > 본 README 의 `claude /afterglow …` 표기는 약식이며, 실제로는 위 두 방식 중 하나로 씁니다.
+>
+> **슬래시 명령 14종** (입력창에서 `/mcp__afterglow__` 자동완성): `init` · `create`(slug,name,role) · `sign`(slug,signer) · `resume`(slug) · `list` · `status` · `inspect`(slug) · `ask`(slug,question) · `handoff`(slug,action) · `interview`(slug,action) · `council`(slugs,question) · `export`(slugs|all) · `import`(input) · `gc`(action). 예: `/mcp__afterglow__ask` → slug=jiyoon, question="온보딩 이탈 어떻게 줄였어요?". 인자 많은 액션은 자연어가 편합니다.
 
 ## 🪶 왜 만들었나
 
