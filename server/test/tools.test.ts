@@ -160,6 +160,45 @@ describe('edit', () => {
     expect(r1.content[0].text).toContain('변경 없음');
   });
 
+  it('open returns the persona.json path + creates a backup snapshot', async () => {
+    await bootstrap();
+    const { runEdit } = await import('../src/tools/edit.js');
+    const { personaPath, listVersions } = await import('../src/storage.js');
+    const r = await runEdit({ slug: 'jiyoon', open: true } as never);
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toContain(personaPath('jiyoon'));
+    expect(r.content[0].text).toMatch(/직접 편집|revalidate/);
+    expect((await listVersions('jiyoon')).length).toBeGreaterThan(0); // backup snapshot
+  });
+
+  it('revalidate applies a hand-edited persona.json + regenerates system-prompt', async () => {
+    await bootstrap();
+    const { runEdit } = await import('../src/tools/edit.js');
+    const { personaPath, readSystemPrompt } = await import('../src/storage.js');
+    const { readFile, writeFile } = await import('node:fs/promises');
+    // Simulate a vim edit: change bio directly in persona.json.
+    const p = JSON.parse(await readFile(personaPath('jiyoon'), 'utf8'));
+    p.bio = '직접편집한소개토큰';
+    await writeFile(personaPath('jiyoon'), JSON.stringify(p, null, 2));
+
+    const r = await runEdit({ slug: 'jiyoon', revalidate: true } as never);
+    expect(r.isError).toBeUndefined();
+    expect(r.content[0].text).toMatch(/재검증 통과|재생성/);
+    const sp = await readSystemPrompt('jiyoon');
+    expect(sp).toContain('직접편집한소개토큰'); // regenerated from the edited file
+  });
+
+  it('revalidate rejects an invalid hand-edited persona.json without applying', async () => {
+    await bootstrap();
+    const { runEdit } = await import('../src/tools/edit.js');
+    const { personaPath } = await import('../src/storage.js');
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(personaPath('jiyoon'), '{ not valid json');
+    const r = await runEdit({ slug: 'jiyoon', revalidate: true } as never);
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toMatch(/파싱 실패|검증 실패/);
+  });
+
   it('removes expertise and sources', async () => {
     await bootstrap();
     const { runEdit } = await import('../src/tools/edit.js');

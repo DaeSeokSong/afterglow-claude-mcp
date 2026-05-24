@@ -132,6 +132,7 @@ Type `/mcp__afterglow__` in Claude Code's prompt box → an autocomplete list ap
 | Dashboard | `/mcp__afterglow__status` | (none) | "afterglow status" |
 | Inspect | `/mcp__afterglow__inspect` | `slug` | "inspect jiyoon" |
 | Ask | `/mcp__afterglow__ask` | `slug` `question` | "ask jiyoon how the payment fallback worked" |
+| Edit | `/mcp__afterglow__edit` | `slug` (`bio` `name` `role` / `open` / `revalidate`) | "change jiyoon's bio to …" |
 | Self-handoff | `/mcp__afterglow__handoff` | `slug` `action` (`signer`) | "start a handoff for jiyoon" |
 | Interview | `/mcp__afterglow__interview` | `slug` `action` (`session` `title` `interviewer`) | "start an interview for jiyoon, title Payment gaps, interviewer J. Kim" |
 | Council | `/mcp__afterglow__council` | `slugs` `question` | "convene jiyoon and jaehoon" |
@@ -150,6 +151,16 @@ Type `/mcp__afterglow__` in Claude Code's prompt box → an autocomplete list ap
 ```
 
 > Tools with many arguments (e.g. interview `attach`/`answer`) are often easier in natural language. Slash commands shine for the frequent entry points (init, create, ask, status, …).
+
+**Three ways to edit:**
+- **Fields directly**: `/mcp__afterglow__edit` → `slug` + `bio`/`name`/`role` (structured patch, auto-validated + system-prompt regenerated + snapshot)
+- **Open in an editor**: `open=true` → prints the `persona.json` path + makes a backup snapshot. Open it in `vim`/`code`/… and edit raw
+- **Revalidate**: after editing, `revalidate=true` → validates your edited `persona.json` (rejects + keeps the file if invalid) + regenerates `system-prompt.md` + snapshot
+  ```text
+  /mcp__afterglow__edit  (slug: jiyoon, open: true)        → prints persona.json path
+  # vim ~/.claude/afterglow/agents/jiyoon/persona.json     → edit & save
+  /mcp__afterglow__edit  (slug: jiyoon, revalidate: true)  → validate + regenerate
+  ```
 
 ## 📐 Interactive proposal (frontend)
 
@@ -429,7 +440,7 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 - [x] **import `--expectAnchor`** (bundle-tamper detection) + **audit checkpoint/fast** (incremental verification for large logs)
 - [x] **BM25 ranking** + opt-in **dense-vector backend** (`AFTERGLOW_RAG_BACKEND=dense` · embeddings/ cache · transparent lexical fallback)
 - [x] **whisper model management** (`transcribe --download/--list-models` + auto-resolution)
-- [x] **Slash commands** `/mcp__afterglow__<name>` — 14 MCP prompts callable straight from the prompt box
+- [x] **Slash commands** `/mcp__afterglow__<name>` — 15 MCP prompts (incl. edit) callable straight from the prompt box
 - [x] 208 vitest + extended stdio handshake (covers all 24 tools + prompts)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 - [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
