@@ -369,7 +369,7 @@ Afterglow/
 │  │  ├─ rag.ts            ← BM25 / dense / hybrid retrieval (knowledge/ + interview transcripts)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 22 tools: …18 above… + interview · export · import · verify
-│  └─ test/                ← 237 vitest + stdio handshake (covers all 24 tools)
+│  └─ test/                ← 261 vitest + stdio handshake (covers all 24 tools)
 │
 └─ docs/
    └─ design-source/       ← original claude.ai/design hand-off (JSX) — reference
@@ -422,7 +422,7 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 237 vitest tests
+npm test             # 261 vitest tests
 npm run test:stdio   # real MCP stdio handshake (all 24 tools + v0.3/v0.4 round-trips)
 npm run test:all     # unit → build → stdio
 ```
@@ -473,7 +473,7 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 - [x] **Auto question-suggestion on new interview** — `interview start` embeds a 4-signal gap analysis and asks "proceed with these questions?" (disable with `suggest=false`)
 - [x] **Missing-argument elicitation** — omit a required arg and the tool returns numbered choices (+ "type your own") with `[필수]`/`[선택]` tags; candidates are dynamic (existing slugs · action enums · session ids · pending question ids)
 - [x] **Slash commands** `/mcp__afterglow__<name>` — 24 MCP prompts (one per tool) — type `afterglow:` → Tab to invoke
-- [x] 237 vitest + extended stdio handshake (covers all 24 tools + prompts)
+- [x] 261 vitest + extended stdio handshake (covers all 24 tools + prompts)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 - [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
 
