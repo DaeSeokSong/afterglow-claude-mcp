@@ -529,5 +529,20 @@ try {
   process.exitCode = 1;
 } finally {
   child.kill();
-  await rm(tmpRoot, { recursive: true, force: true });
+  // Windows holds file handles until the child fully exits, so an immediate
+  // rmdir hits EBUSY. Wait for the process to exit (bounded), then clean up
+  // best-effort — a temp-dir cleanup failure must not fail an OK smoke run.
+  await new Promise((resolve) => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve();
+    child.once('exit', resolve);
+    setTimeout(resolve, 3000);
+  });
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await rm(tmpRoot, { recursive: true, force: true });
+      break;
+    } catch {
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
 }
