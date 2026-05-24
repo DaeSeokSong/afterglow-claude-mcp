@@ -12,6 +12,7 @@ import {
 import { append as auditAppend } from '../audit.js';
 import { retrieve, type Retrieval } from '../rag.js';
 import { sanitisePromptLine, sanitisePromptText } from '../sanitize.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const councilShape = {
@@ -19,8 +20,9 @@ export const councilShape = {
     .array(z.string().min(1))
     .min(2)
     .max(6)
-    .describe('참가할 에이전트 slug 배열 (2–6명).'),
-  question: z.string().min(1).describe('회의 주제 / 사용자 질문.'),
+    .optional()
+    .describe('(필수) 참가할 에이전트 slug 배열 (2–6명). 생략 시 안내합니다.'),
+  question: z.string().min(1).optional().describe('(필수) 회의 주제 / 사용자 질문.'),
   topic: z
     .string()
     .min(1)
@@ -77,6 +79,11 @@ interface ParticipantContext {
 export async function runCouncil(args: CouncilArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('council', args as unknown as Record<string, unknown>, [
+      { name: 'slugs', required: true, label: '참여 에이전트 (다중 — 쉼표로)', candidates: slugCandidates, example: 'jiyoon,jaehoon' },
+      { name: 'question', required: true, label: '회의 주제 / 질문', example: '온보딩이 결제에 영향을 주나요?' },
+    ]);
+    if (ask) return ask;
 
     const uniqueSlugs = Array.from(new Set(args.slugs));
     if (uniqueSlugs.length !== args.slugs.length) {

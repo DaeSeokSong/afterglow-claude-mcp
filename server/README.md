@@ -413,7 +413,7 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (228 tests — +v08 17 +integration 6 +v03 9, etc.)
+npm test                   # vitest (237 tests — +elicit 9 +v08 17 +v03 9, etc.)
 npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (24 도구 모두 happy-path + v0.3 기능 라운드트립)
 npm run test:all           # 전체 (unit → build → stdio)
 ```
@@ -518,8 +518,9 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 - [x] **whisper 모델 관리** (`transcribe --download/--list-models` + 자동 해석)
 - [x] **PII 마스킹 + 저장 암호화** — 전사본 한정 (`AFTERGLOW_PII_REDACT` / `AFTERGLOW_ENCRYPTION_KEY` AES-256-GCM), RAG 투명 복호화
 - [x] **신규 인터뷰 자동 질문 제안** — `interview start` 에 4-신호 갭 분석 + "진행할까요?" 자동 질문 동봉 (`suggest=false` 로 해제)
+- [x] **인자 자동 안내(elicitation)** — 필수 인자 누락 시 번호 선택지 + `[필수]`/`[선택]` 표기로 안내 (필수 인자 있는 도구 전체). 스키마는 optional + handler 에서 검증/안내
 - [x] **MCP prompts → 슬래시 명령** `/mcp__afterglow__<이름>` (24종 — 도구 전부 1:1, `afterglow:` 입력→Tab, 인자 자동완성)
-- [x] vitest 228개 + 24 도구 stdio 핸드셰이크 (prompts 포함)
+- [x] vitest 237개 + 24 도구 stdio 핸드셰이크 (prompts 포함)
 - [ ] per-tool ACL · Web companion · 정기 retention 자동화
 - [ ] knowledge 파일까지 확장한 일괄 암호화/복호화 도구 · 외부 STT(Tier 2) 어댑터
 

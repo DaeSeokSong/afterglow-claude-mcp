@@ -7,10 +7,11 @@ import {
   type HistoryEvent,
 } from '../storage.js';
 import { sanitisePromptLine } from '../sanitize.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const historyShape = {
-  slug: z.string().min(1).describe('조회할 에이전트 slug.'),
+  slug: z.string().min(1).optional().describe('(필수) 조회할 에이전트 slug. 생략 시 안내합니다.'),
   since: z
     .string()
     .optional()
@@ -43,6 +44,12 @@ function toDate(input: string | undefined): Date | null {
 export async function runHistory(args: HistoryArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('history', args as unknown as Record<string, unknown>, [
+      { name: 'slug', required: true, label: '로그를 볼 에이전트', candidates: slugCandidates, example: 'jiyoon' },
+      { name: 'filter', required: false, label: '키워드 필터' },
+      { name: 'limit', required: false, label: '최대 줄 수·기본50' },
+    ]);
+    if (ask) return ask;
     if (!(await agentExists(args.slug))) {
       return errorReply(new AgentNotFoundError(args.slug).message);
     }

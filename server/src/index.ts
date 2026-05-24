@@ -380,9 +380,14 @@ export function buildServer(): McpServer {
  * un-handled rejections either.
  */
 function wrap<TArgs>(handler: (args: TArgs) => Promise<ToolReply>) {
-  return async (args: TArgs): Promise<ToolReply> => {
+  // Param typed `unknown` so the callback stays assignable to every tool's
+  // (now partly-optional) input schema. Required-arg enforcement + friendly
+  // elicitation happens inside each handler (tools/elicit.ts), not via zod —
+  // that's what lets a missing arg return a guided choice list instead of a
+  // raw SDK validation error.
+  return async (args: unknown): Promise<ToolReply> => {
     try {
-      return await handler(args);
+      return await handler(args as TArgs);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return errorReply(msg);

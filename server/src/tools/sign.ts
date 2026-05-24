@@ -9,15 +9,17 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { sanitisePromptLine } from '../sanitize.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const signShape = {
-  slug: z.string().min(1).describe('서명할 에이전트 slug.'),
+  slug: z.string().min(1).optional().describe('(필수) 서명할 에이전트 slug. 생략 시 안내합니다.'),
   signer: z
     .string()
     .min(1)
     .max(200)
-    .describe('서명자 표시명. 본인 인계 모드면 본인 이름, HR 대리 인계면 "HR · 김OO (대리, 본인 부재)" 같은 형식. CR/LF 자동 제거.'),
+    .optional()
+    .describe('(필수) 서명자 표시명. 본인 인계 모드면 본인 이름, HR 대리 인계면 "HR · 김OO (대리, 본인 부재)" 같은 형식. CR/LF 자동 제거.'),
   note: z
     .string()
     .max(1_000)
@@ -39,6 +41,12 @@ interface SignArgs {
 export async function runSign(args: SignArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('sign', args as unknown as Record<string, unknown>, [
+      { name: 'slug', required: true, label: '서명할 에이전트', candidates: slugCandidates, example: 'jiyoon' },
+      { name: 'signer', required: true, label: '서명자 이름', example: '이지윤' },
+      { name: 'note', required: false, label: '동의 범위/메모' },
+    ]);
+    if (ask) return ask;
     if (!(await agentExists(args.slug))) {
       return errorReply(new AgentNotFoundError(args.slug).message);
     }

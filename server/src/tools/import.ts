@@ -27,10 +27,11 @@ import {
 } from '../portable.js';
 import type { Provenance } from '../interview.js';
 import { sanitisePromptLine } from '../sanitize.js';
+import { elicitMissing } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const importShape = {
-  input: z.string().min(1).max(2_000).describe('번들 폴더 또는 단일 에이전트 폴더 경로.'),
+  input: z.string().min(1).max(2_000).optional().describe('(필수) 번들 폴더 또는 단일 에이전트 폴더 경로. 생략 시 안내합니다.'),
   as: z
     .string()
     .min(1)
@@ -82,6 +83,13 @@ interface SourceEntry {
 export async function runImport(args: ImportArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('import', args as unknown as Record<string, unknown>, [
+      { name: 'input', required: true, label: '가져올 번들/폴더 경로', example: './afterglow-export-…/' },
+      { name: 'expectAnchor', required: false, label: '무결성 앵커 해시 (sha256:…)' },
+      { name: 'as', required: false, label: 'slug 변경' },
+      { name: 'dryRun', required: false, label: '검증만(verify와 동일)' },
+    ]);
+    if (ask) return ask;
 
     if (args.input.includes('\0')) return errorReply('input 경로에 NUL 바이트가 있습니다.');
     const inputDir = isAbsolute(args.input) ? resolve(args.input) : resolve(process.cwd(), args.input);

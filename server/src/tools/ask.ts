@@ -12,6 +12,7 @@ import {
 import { retrieve, type Retrieval } from '../rag.js';
 import { append as auditAppend } from '../audit.js';
 import { sanitisePromptLine, sanitisePromptText } from '../sanitize.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 // Mirrors access.ts RULE_PATTERN so caller spec is treated identically by
@@ -19,8 +20,8 @@ import { errorReply, safe, type ToolReply } from './types.js';
 const CALLER_PATTERN = /^(user|role|team):[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 
 export const askShape = {
-  slug: z.string().min(1).describe('질문을 받을 에이전트의 slug.'),
-  question: z.string().min(1).max(10_000).describe('질문 내용. 최대 10000자.'),
+  slug: z.string().min(1).optional().describe('(필수) 질문을 받을 에이전트의 slug. 생략하면 후보 목록을 안내합니다.'),
+  question: z.string().min(1).max(10_000).optional().describe('(필수) 질문 내용. 최대 10000자.'),
   topK: z
     .number()
     .int()
@@ -54,6 +55,13 @@ interface AskArgs {
 export async function runAsk(args: AskArgs): Promise<ToolReply> {
   return safe(async () => {
   await assertInitialized();
+  const ask = await elicitMissing('ask', args as unknown as Record<string, unknown>, [
+    { name: 'slug', required: true, label: '질문할 에이전트', candidates: slugCandidates, example: 'jiyoon' },
+    { name: 'question', required: true, label: '질문 내용', example: '온보딩 step3 이탈 어떻게 줄였어요?' },
+    { name: 'topK', required: false, label: 'RAG 청크 수 · 기본4' },
+    { name: 'caller', required: false, label: '호출자 · 권한정책 deny일 때 필수' },
+  ]);
+  if (ask) return ask;
   // Registry-aware gate: handles not-found · archived · not-signed in order.
   try {
     await assertActive(args.slug);

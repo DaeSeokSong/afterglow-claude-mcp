@@ -10,6 +10,7 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { sanitisePromptLine } from '../sanitize.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 // recordIds end up embedded in log lines + the corrections.log parser splits
@@ -19,8 +20,9 @@ const RECORD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$/;
 export const correctShape = {
   action: z
     .enum(['feedback', 'edit-answer', 'save-rule', 'list'])
-    .describe('feedback | edit-answer | save-rule | list.'),
-  slug: z.string().min(1).describe('대상 에이전트 slug.'),
+    .optional()
+    .describe('(필수) feedback | edit-answer | save-rule | list.'),
+  slug: z.string().min(1).optional().describe('(필수) 대상 에이전트 slug. 생략 시 안내합니다.'),
   recordId: z
     .string()
     .max(128)
@@ -60,6 +62,13 @@ interface CorrectArgs {
 export async function runCorrect(args: CorrectArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('correct', args as unknown as Record<string, unknown>, [
+      { name: 'slug', required: true, label: '보정할 에이전트', candidates: slugCandidates, example: 'jiyoon' },
+      { name: 'action', required: true, label: '동작', enumValues: ['feedback', 'edit-answer', 'save-rule', 'list'] },
+      { name: 'feedback', required: false, label: 'feedback/save-rule 본문' },
+      { name: 'recordId', required: false, label: '대상 기록 id' },
+    ]);
+    if (ask) return ask;
     try {
       await getStatus(args.slug); // registry-aware existence
     } catch (e) {

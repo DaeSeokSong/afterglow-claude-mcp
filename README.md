@@ -128,6 +128,8 @@ claude /afterglow ask jiyoon "..."
 
 > `afterglow:init` ⇥ `/mcp__afterglow__init` 처럼 1:1 대응입니다 (`afterglow:` = 입력·검색용, `/mcp__afterglow__` = 실행 형식). 자연어("afterglow 초기화해줘")로도 동일하게 호출됩니다. 인자가 많은 동작(interview attach·answer 등)은 자연어가 더 편할 수 있어요.
 
+> **🧭 인자를 안 채워도 됩니다 — 빠진 필수 인자는 자동 안내.** 필수 인자를 비우고 실행하면, 그 도구가 **번호 선택지 + 도움말**을 돌려줍니다. 예) `afterglow:ask` 만 실행 → "①jiyoon ②jaehoon … ③직접 입력" 처럼 후보를 고르거나 직접 입력하도록 안내하고, 각 인자에 **`[필수]`/`[선택]`** 을 표기합니다. (아래 표의 `(괄호)` 도 선택 인자를 뜻합니다.)
+
 #### 셋업 · 서명 · 보관
 | 명령 | 인자 (괄호=선택) | 설명 | 예시 |
 | --- | --- | --- | --- |
@@ -366,7 +368,7 @@ Afterglow/
 │  │  ├─ portable.ts       ← 번들 manifest + 해시 + 인젝션 스캔
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 24 도구: …+ interview · export · import · verify · status · gc
-│  └─ test/                ← vitest 228 + stdio 핸드셰이크 (24 도구)
+│  └─ test/                ← vitest 237 + stdio 핸드셰이크 (24 도구)
 │
 └─ docs/
    └─ design-source/       ← claude.ai/design 핸드오프 원본 (JSX) — 참조용
@@ -468,8 +470,9 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 - [x] **whisper 모델 관리** (`transcribe --download/--list-models` + 자동 해석)
 - [x] **PII 마스킹 + 저장 암호화** — 전사본에 한해 이메일·전화·주민번호·카드·토큰 마스킹(`AFTERGLOW_PII_REDACT=1`) + AES-256-GCM 암호화(`AFTERGLOW_ENCRYPTION_KEY`). RAG 는 투명 복호화로 그대로 검색
 - [x] **신규 인터뷰 자동 질문 제안** — `interview start` 시 4-신호 갭 분석을 동봉하고 "이 질문들로 진행할까요?" 를 자동으로 물어봄 (`suggest=false` 로 해제)
+- [x] **인자 자동 안내(elicitation)** — 필수 인자를 비우고 실행하면 도구가 번호 선택지(+`직접 입력`) 와 `[필수]`/`[선택]` 표기로 안내. 후보는 동적(기존 slug·action enum·회차 id·대기 질문 id 등)
 - [x] **슬래시 명령** `/mcp__afterglow__<이름>` — MCP prompt 24종(도구 전부)으로 `afterglow:` 입력→Tab 호출
-- [x] vitest 228개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
+- [x] vitest 237개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 - [x] **핸즈온 Jupyter 노트북** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — 초보자용 전 기능 따라하기
 

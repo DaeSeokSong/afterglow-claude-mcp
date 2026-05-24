@@ -12,10 +12,11 @@ import {
   type AgentValidation,
 } from '../portable.js';
 import { sanitisePromptLine } from '../sanitize.js';
+import { elicitMissing } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const verifyShape = {
-  input: z.string().min(1).max(2_000).describe('검증할 번들 폴더 또는 단일 에이전트 폴더 경로.'),
+  input: z.string().min(1).max(2_000).optional().describe('(필수) 검증할 번들 폴더 또는 단일 에이전트 폴더 경로. 생략 시 안내합니다.'),
 } as const;
 
 interface VerifyArgs {
@@ -30,6 +31,10 @@ interface VerifyArgs {
 export async function runVerify(args: VerifyArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('verify', args as unknown as Record<string, unknown>, [
+      { name: 'input', required: true, label: '검증할 번들/폴더 경로', example: './afterglow-export-…/' },
+    ]);
+    if (ask) return ask;
 
     if (args.input.includes('\0')) return errorReply('input 경로에 NUL 바이트가 있습니다.');
     const inputDir = isAbsolute(args.input) ? resolve(args.input) : resolve(process.cwd(), args.input);

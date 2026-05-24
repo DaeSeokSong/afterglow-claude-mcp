@@ -66,7 +66,23 @@ export async function runExport(args: ExportArgs): Promise<ToolReply> {
     } else if (args.slugs && args.slugs.length > 0) {
       targets = args.slugs;
     } else {
-      return errorReply('slugs(다중) 또는 all=true 중 하나가 필요합니다.');
+      // Neither provided → guide the user (slugs is a one-of with all).
+      const lines: string[] = [];
+      lines.push('✦ export — 무엇을 내보낼지 골라주세요. (slugs 또는 all 중 하나 [필수])');
+      lines.push('');
+      lines.push('[필수] slugs — 내보낼 에이전트(다중, 쉼표)');
+      const active = reg.agents.filter((a) => a.status !== 'archived');
+      if (active.length > 0) {
+        active.slice(0, 9).forEach((a, i) => lines.push(`   ${i + 1}) ${a.slug}   (${sanitisePromptLine(a.name, 24)} · ${a.status})`));
+        lines.push(`   ${Math.min(active.length, 9) + 1}) 직접 입력 (예: jiyoon,jaehoon)`);
+      } else {
+        lines.push('   → 직접 입력 (등록된 에이전트가 아직 없어요)');
+      }
+      lines.push('[또는] all:true — 보관(archived) 제외 전체 내보내기');
+      lines.push('[선택] output(출력 폴더) · exportedBy(내보낸 사람) · includeVersions(.versions 포함)');
+      lines.push('');
+      lines.push('번호를 고르거나 값을 알려주시면 실행할게요.');
+      return { content: [{ type: 'text', text: lines.join('\n') }], isError: true };
     }
     if (targets.length === 0) return errorReply('내보낼 에이전트가 없습니다.');
 

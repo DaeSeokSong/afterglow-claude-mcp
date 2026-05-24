@@ -128,6 +128,8 @@ See [`server/README.md`](./server/README.md) for the full tool reference.
 
 > `afterglow:init` ⇥ `/mcp__afterglow__init` is a 1:1 mapping (`afterglow:` = what you type to find it, `/mcp__afterglow__` = the resolved form). Natural language ("initialize afterglow") works identically. Tools with many arguments (interview `attach`/`answer`, …) are often easier in natural language.
 
+> **🧭 You don't have to fill args in — missing required ones are guided.** Run a tool with a required arg omitted and it returns **numbered choices + help** instead of erroring: e.g. just `afterglow:ask` → "①jiyoon ②jaehoon … ③type your own", and each argument is tagged **`[필수]`(required) / `[선택]`(optional)**. (The `(parens)` in the tables below also mark optional args.)
+
 #### Setup · sign · archive
 | Command | Args (parens = optional) | What | Example |
 | --- | --- | --- | --- |
@@ -367,7 +369,7 @@ Afterglow/
 │  │  ├─ rag.ts            ← BM25 / dense / hybrid retrieval (knowledge/ + interview transcripts)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 22 tools: …18 above… + interview · export · import · verify
-│  └─ test/                ← 228 vitest + stdio handshake (covers all 24 tools)
+│  └─ test/                ← 237 vitest + stdio handshake (covers all 24 tools)
 │
 └─ docs/
    └─ design-source/       ← original claude.ai/design hand-off (JSX) — reference
@@ -420,7 +422,7 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 228 vitest tests
+npm test             # 237 vitest tests
 npm run test:stdio   # real MCP stdio handshake (all 24 tools + v0.3/v0.4 round-trips)
 npm run test:all     # unit → build → stdio
 ```
@@ -469,8 +471,9 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 - [x] **whisper model management** (`transcribe --download/--list-models` + auto-resolution)
 - [x] **PII masking + at-rest encryption** — transcript-only email/phone/RRN/card/token masking (`AFTERGLOW_PII_REDACT=1`) + AES-256-GCM (`AFTERGLOW_ENCRYPTION_KEY`); RAG decrypts transparently so search still works
 - [x] **Auto question-suggestion on new interview** — `interview start` embeds a 4-signal gap analysis and asks "proceed with these questions?" (disable with `suggest=false`)
+- [x] **Missing-argument elicitation** — omit a required arg and the tool returns numbered choices (+ "type your own") with `[필수]`/`[선택]` tags; candidates are dynamic (existing slugs · action enums · session ids · pending question ids)
 - [x] **Slash commands** `/mcp__afterglow__<name>` — 24 MCP prompts (one per tool) — type `afterglow:` → Tab to invoke
-- [x] 228 vitest + extended stdio handshake (covers all 24 tools + prompts)
+- [x] 237 vitest + extended stdio handshake (covers all 24 tools + prompts)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 - [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
 

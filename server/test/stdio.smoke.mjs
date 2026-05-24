@@ -522,6 +522,20 @@ try {
     throw new Error(`audit chain not OK: ${JSON.stringify(auditJson.verification)}`);
   }
 
+  // v0.8 — missing-arg elicitation: a required-arg omission returns a guided
+  // reply (with [필수] tags + slug candidates), not a crash. Goes through the
+  // real MCP transport, so this also proves the relaxed (optional) schema lets
+  // the handler run instead of the SDK rejecting on validation.
+  const elicitReply = await callTool('afterglow_ask', {});
+  const elicit = elicitReply.result;
+  if (!elicit?.isError || !/정보가 더 필요/.test(elicit.content[0].text) || !/\[필수\] slug/.test(elicit.content[0].text) || !/jiyoon/.test(elicit.content[0].text)) {
+    throw new Error(`v0.8 elicitation guide missing for ask with no args:\n${JSON.stringify(elicitReply)}`);
+  }
+  // v0.8 — status surfaces the env/security posture.
+  if (!statusJson.env || typeof statusJson.env.ragMode !== 'string' || typeof statusJson.env.whisperEngine !== 'string') {
+    throw new Error(`v0.8 status env block missing: ${JSON.stringify(statusJson.env)}`);
+  }
+
   console.log('smoke: OK');
   console.log(`  serverInfo.name    : ${init.result.serverInfo.name}`);
   console.log(`  protocolVersion    : ${init.result.protocolVersion}`);
@@ -541,6 +555,8 @@ try {
   console.log(`  v0.3 suggest/transc: suggest-questions + transcribe --text save  OK`);
   console.log(`  v0.3 audit         : checkpoint (${cpJson.checkpoints}) + fast verify  OK`);
   console.log(`  v0.5 prompts       : ${promptNames.length} slash commands (/mcp__afterglow__*)  OK`);
+  console.log(`  v0.8 elicitation   : missing-arg → guided choices ([필수]/[선택] + candidates)  OK`);
+  console.log(`  v0.8 status env    : RAG ${statusJson.env.ragMode} · whisper ${statusJson.env.whisperEngine} · PII ${statusJson.env.piiRedaction} · enc ${statusJson.env.encryptionAtRest}  OK`);
 } catch (err) {
   console.error('smoke: FAIL');
   console.error(err instanceof Error ? err.stack : String(err));

@@ -20,6 +20,7 @@ import {
   renderSystemPrompt,
 } from '../persona.js';
 import { append as auditAppend } from '../audit.js';
+import { elicitMissing } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const createShape = {
@@ -27,9 +28,10 @@ export const createShape = {
     .string()
     .min(1)
     .max(32)
-    .describe('짧은 식별자. 소문자/숫자/하이픈. 예: jiyoon, jaehoon, john-kim.'),
-  name: z.string().min(1).max(200).describe('실제 이름. 예: 이지윤.'),
-  role: z.string().min(1).max(200).describe('직무 / 부서. 예: 프로덕트 디자이너 · Product팀.'),
+    .optional()
+    .describe('(필수) 짧은 식별자. 소문자/숫자/하이픈. 예: jiyoon, jaehoon, john-kim. 생략 시 안내합니다.'),
+  name: z.string().min(1).max(200).optional().describe('(필수) 실제 이름. 예: 이지윤.'),
+  role: z.string().min(1).max(200).optional().describe('(필수) 직무 / 부서. 예: 프로덕트 디자이너 · Product팀.'),
   tenure: z.string().max(200).optional().describe('재직 기간. 예: 2019.03 – 2025.11.'),
   bio: z.string().max(20_000).optional().describe('한 줄 소개. 최대 20000자.'),
   expertise: z
@@ -65,6 +67,15 @@ export interface CreateArgs {
 export async function runCreate(args: CreateArgs): Promise<ToolReply> {
   return safe(async () => {
   await assertInitialized();
+  const ask = await elicitMissing('create', args as unknown as Record<string, unknown>, [
+    { name: 'slug', required: true, label: '새 에이전트 식별자 (영소문자/숫자/하이픈)', example: 'jiyoon' },
+    { name: 'name', required: true, label: '실제 이름', example: '이지윤' },
+    { name: 'role', required: true, label: '직무 / 부서', example: '프로덕트 디자이너' },
+    { name: 'tenure', required: false, label: '재직 기간' },
+    { name: 'bio', required: false, label: '한 줄 소개' },
+    { name: 'expertise', required: false, label: '자신있는 카테고리' },
+  ]);
+  if (ask) return ask;
   try {
     assertValidSlug(args.slug);
   } catch (e) {

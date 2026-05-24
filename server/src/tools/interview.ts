@@ -52,6 +52,7 @@ import {
   whisperEngine,
   type WasmResult,
 } from '../whisper.js';
+import { elicitMissing, slugCandidates, type ElicitArg, type ElicitCandidate } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 /* --------------------------------------------------------------- */
@@ -105,10 +106,11 @@ export const interviewShape = {
       'abort',
       'transcribe',
     ])
+    .optional()
     .describe(
-      'start | add-question | answer | gap-check | suggest-questions | attach | review | annotate | status | list | inspect | finalize | abort | transcribe.',
+      '(필수) start | add-question | answer | gap-check | suggest-questions | attach | review | annotate | status | list | inspect | finalize | abort | transcribe.',
     ),
-  slug: z.string().min(1).describe('대상 에이전트 slug.'),
+  slug: z.string().min(1).optional().describe('(필수) 대상 에이전트 slug. 생략 시 안내합니다.'),
   session: z
     .string()
     .max(64)
@@ -245,9 +247,94 @@ interface InterviewArgs {
 /* Dispatch                                                        */
 /* --------------------------------------------------------------- */
 
+const INTERVIEW_ACTIONS = [
+  'start', 'add-question', 'answer', 'gap-check', 'suggest-questions', 'attach',
+  'review', 'annotate', 'status', 'list', 'inspect', 'finalize', 'abort', 'transcribe',
+] as const;
+
+/** Candidate provider: interview rounds of an agent (id + title). */
+async function sessionCandidates(slug?: string): Promise<ElicitCandidate[]> {
+  if (!slug) return [];
+  try {
+    const idx = await readInterviewIndex(slug);
+    return idx.sessions.map((s) => ({ value: s.sessionId, note: `${sanitisePromptLine(s.title, 30)} · ${s.status}` }));
+  } catch {
+    return [];
+  }
+}
+
+/** Candidate provider: pending question ids in a session (id + question text). */
+async function pendingQuestionCandidates(slug?: string, session?: string): Promise<ElicitCandidate[]> {
+  if (!slug || !session) return [];
+  try {
+    const s = await readInterviewSession(slug, session);
+    if (!s) return [];
+    return s.questions
+      .filter((q) => q.status === 'pending')
+      .map((q) => ({ value: q.id, note: sanitisePromptLine(q.question, 40) }));
+  } catch {
+    return [];
+  }
+}
+
+/** Build the per-action elicitation spec for interview. */
+function interviewSpec(args: InterviewArgs): ElicitArg[] {
+  const spec: ElicitArg[] = [
+    { name: 'slug', required: true, label: '대상 에이전트', candidates: slugCandidates, example: 'jiyoon' },
+    { name: 'action', required: true, label: '동작', enumValues: INTERVIEW_ACTIONS },
+  ];
+  const sessionArg = (required: boolean): ElicitArg => ({
+    name: 'session', required, label: '대상 회차 id', candidates: () => sessionCandidates(args.slug), example: '001-결제-갭',
+  });
+  switch (args.action) {
+    case 'start':
+      spec.push({ name: 'interviewer', required: true, label: '진행자(인계자) 이름', example: '김후임' });
+      spec.push({ name: 'title', required: false, label: '회차 제목' });
+      spec.push({ name: 'interviewee', required: false, label: '인터뷰이(퇴사자) 이름' });
+      break;
+    case 'add-question':
+      spec.push(sessionArg(true));
+      spec.push({ name: 'question', required: !(args.questions && args.questions.length > 0), label: '추가할 질문', example: '5초 timeout 후 정책?' });
+      break;
+    case 'answer':
+      spec.push(sessionArg(true));
+      spec.push({ name: 'id', required: true, label: '답변할 질문 id', candidates: () => pendingQuestionCandidates(args.slug, args.session) });
+      spec.push({ name: 'answer', required: !args.decline, label: '답변 본문 (decline=true면 불필요)', example: '5초 후 자동 전환' });
+      break;
+    case 'attach':
+      spec.push(sessionArg(true));
+      spec.push({ name: 'file', required: true, label: '미디어/파일 경로', example: './rec.mp3' });
+      spec.push({ name: 'speakers', required: false, label: '발화자(오디오·비디오 필수)' });
+      break;
+    case 'annotate':
+      spec.push(sessionArg(true));
+      spec.push({ name: 'note', required: true, label: '인계자 추정 메모' });
+      spec.push({ name: 'topic', required: false, label: '주석 주제' });
+      break;
+    case 'finalize':
+      spec.push(sessionArg(true));
+      spec.push({ name: 'signer', required: true, label: '서명자 이름', example: '김후임' });
+      spec.push({ name: 'signRole', required: false, label: 'interviewer | interviewee' });
+      break;
+    case 'gap-check':
+    case 'review':
+    case 'inspect':
+      spec.push(sessionArg(true));
+      break;
+    case 'transcribe':
+      // Model management (--download / --listModels) is session-independent.
+      if (!args.download && !args.listModels) spec.push(sessionArg(true));
+      break;
+    // suggest-questions / status / list / abort → no extra required beyond slug(+action)
+  }
+  return spec;
+}
+
 export async function runInterview(args: InterviewArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const guide = await elicitMissing('interview', args as unknown as Record<string, unknown>, interviewSpec(args));
+    if (guide) return guide;
     try {
       await getStatus(args.slug);
     } catch (e) {

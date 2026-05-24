@@ -13,10 +13,11 @@ import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { append as auditAppend } from '../audit.js';
 import { sanitisePromptLine, sanitisePromptText } from '../sanitize.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const inspectShape = {
-  slug: z.string().min(1).describe('확인할 에이전트의 slug.'),
+  slug: z.string().min(1).optional().describe('(필수) 확인할 에이전트의 slug. 생략 시 안내합니다.'),
   json: z.boolean().optional().describe('JSON으로 출력.'),
 } as const;
 
@@ -28,6 +29,10 @@ interface InspectArgs {
 export async function runInspect(args: InspectArgs): Promise<ToolReply> {
   return safe(async () => {
   await assertInitialized();
+  const ask = await elicitMissing('inspect', args as unknown as Record<string, unknown>, [
+    { name: 'slug', required: true, label: '상세를 볼 에이전트', candidates: slugCandidates, example: 'jiyoon' },
+  ]);
+  if (ask) return ask;
   if (!(await agentExists(args.slug))) {
     return errorReply(new AgentNotFoundError(args.slug).message);
   }

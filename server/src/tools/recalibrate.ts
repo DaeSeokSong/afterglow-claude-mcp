@@ -12,10 +12,11 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { PersonaSchema, renderSystemPrompt, type Persona } from '../persona.js';
+import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const recalibrateShape = {
-  slug: z.string().min(1).describe('보정할 에이전트 slug.'),
+  slug: z.string().min(1).optional().describe('(필수) 보정할 에이전트 slug. 생략 시 안내합니다.'),
   apply: z.boolean().optional().describe('true 면 실제 persona.json 수정. 기본은 dry-run.'),
   minSample: z
     .number()
@@ -406,6 +407,12 @@ async function runRecalibrateByTopic(args: RecalibrateArgs): Promise<ToolReply> 
 export async function runRecalibrate(args: RecalibrateArgs): Promise<ToolReply> {
   return safe(async () => {
     await assertInitialized();
+    const ask = await elicitMissing('recalibrate', args as unknown as Record<string, unknown>, [
+      { name: 'slug', required: true, label: '신뢰도 보정할 에이전트', candidates: slugCandidates, example: 'jiyoon' },
+      { name: 'byTopic', required: false, label: '토픽별 진단' },
+      { name: 'apply', required: false, label: '결과를 페르소나에 반영' },
+    ]);
+    if (ask) return ask;
     if (!(await agentExists(args.slug))) {
       return errorReply(new AgentNotFoundError(args.slug).message);
     }
