@@ -163,7 +163,7 @@ See [`server/README.md`](./server/README.md) for the full tool reference.
 | Command | Args | What | Example |
 | --- | --- | --- | --- |
 | `afterglow:handoff` | `slug` `action`(start\|review\|status\|finalize\|abort) (`signer`) | self-review handoff | `handoff → slug:jiyoon, action:start` |
-| `afterglow:interview` | `slug` `action`(start\|add-question\|answer\|gap-check\|suggest-questions\|attach\|review\|annotate\|status\|list\|inspect\|finalize\|abort\|transcribe) (`session` `title` `interviewer`) | successor-driven interviews | `interview → slug:jiyoon, action:start, title:Payment gaps, interviewer:J. Kim` |
+| `afterglow:interview` | `slug` `action`(start\|add-question\|answer\|gap-check\|suggest-questions\|attach\|review\|annotate\|status\|list\|inspect\|finalize\|abort\|transcribe\|export-sheet\|import-answers) (`session` `title` `interviewer` `mode` `sheet`) | successor-driven interviews (real-time sync / file-based async) | `interview → slug:jiyoon, action:start, mode:async` |
 | `afterglow:council` | `slugs` `question` | multi-agent council | `council → slugs:jiyoon,jaehoon, question:does onboarding affect payments?` |
 | `afterglow:council-summary` | (`file`) | auto-summarize a transcript | `council-summary` |
 
@@ -369,7 +369,7 @@ Afterglow/
 │  │  ├─ rag.ts            ← BM25 / dense / hybrid retrieval (knowledge/ + interview transcripts)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 22 tools: …18 above… + interview · export · import · verify
-│  └─ test/                ← 261 vitest + stdio handshake (covers all 24 tools)
+│  └─ test/                ← 269 vitest + stdio handshake (covers all 24 tools)
 │
 └─ docs/
    └─ design-source/       ← original claude.ai/design hand-off (JSX) — reference
@@ -422,7 +422,7 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 261 vitest tests
+npm test             # 269 vitest tests
 npm run test:stdio   # real MCP stdio handshake (all 24 tools + v0.3/v0.4 round-trips)
 npm run test:all     # unit → build → stdio
 ```
@@ -449,7 +449,7 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 
 ## 🗺 Roadmap
 
-### Now (v0.8.0)
+### Now (v0.9.0)
 - [x] 18-screen interactive proposal (Vite + React 19 + TS)
 - [x] Cmd+K palette + keyboard shortcuts + cross-screen click navigation
 - [x] All 24 MCP tools (`init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · **`interview`** · **`export`** · **`import`** · **`verify`** · **`status`** · **`gc`**)
@@ -472,8 +472,9 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 - [x] **PII masking + at-rest encryption** — transcript-only email/phone/RRN/card/token masking (`AFTERGLOW_PII_REDACT=1`) + AES-256-GCM (`AFTERGLOW_ENCRYPTION_KEY`); RAG decrypts transparently so search still works
 - [x] **Auto question-suggestion on new interview** — `interview start` embeds a 4-signal gap analysis and asks "proceed with these questions?" (disable with `suggest=false`)
 - [x] **Missing-argument elicitation** — omit a required arg and the tool returns numbered choices (+ "type your own") with `[필수]`/`[선택]` tags; candidates are dynamic (existing slugs · action enums · session ids · pending question ids)
+- [x] **Choose how interviews run** — real-time (`mode=sync`, record `answer` live) vs file-based (`mode=async` → `export-sheet` writes a fillable sheet → interviewee returns it → `import-answers` ingests it)
 - [x] **Slash commands** `/mcp__afterglow__<name>` — 24 MCP prompts (one per tool) — type `afterglow:` → Tab to invoke
-- [x] 261 vitest + extended stdio handshake (covers all 24 tools + prompts)
+- [x] 269 vitest + extended stdio handshake (covers all 24 tools + prompts)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 - [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
 

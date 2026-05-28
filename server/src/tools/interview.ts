@@ -105,10 +105,12 @@ export const interviewShape = {
       'finalize',
       'abort',
       'transcribe',
+      'export-sheet',
+      'import-answers',
     ])
     .optional()
     .describe(
-      '(필수) start | add-question | answer | gap-check | suggest-questions | attach | review | annotate | status | list | inspect | finalize | abort | transcribe.',
+      '(필수) start | add-question | answer | gap-check | suggest-questions | attach | review | annotate | status | list | inspect | finalize | abort | transcribe | export-sheet(답변지 파일 생성) | import-answers(채운 답변지 반영).',
     ),
   slug: z.string().min(1).optional().describe('(필수) 대상 에이전트 slug. 생략 시 안내합니다.'),
   session: z
@@ -135,6 +137,13 @@ export const interviewShape = {
     .boolean()
     .optional()
     .describe('start 시 자동 질문 제안 + "진행할까요?" 확인 동봉 여부 (기본 true, interview 한정).'),
+
+  /* export-sheet / import-answers (async 파일 인터뷰) */
+  sheet: z
+    .string()
+    .max(1_000)
+    .optional()
+    .describe('export-sheet 시 답변지 출력 경로(생략 시 회차 폴더에 자동 생성). import-answers 시 채워서 돌려받은 답변지 경로(필수).'),
 
   /* add-question */
   question: z.string().max(2_000).optional().describe('add-question 시 단일 질문.'),
@@ -214,6 +223,7 @@ interface InterviewArgs {
   intervieweeAbsent?: boolean;
   mode?: 'sync' | 'async';
   suggest?: boolean;
+  sheet?: string;
   question?: string;
   questions?: string[];
   fromGap?: InterviewQuestion['fromGap'];
@@ -250,6 +260,7 @@ interface InterviewArgs {
 const INTERVIEW_ACTIONS = [
   'start', 'add-question', 'answer', 'gap-check', 'suggest-questions', 'attach',
   'review', 'annotate', 'status', 'list', 'inspect', 'finalize', 'abort', 'transcribe',
+  'export-sheet', 'import-answers',
 ] as const;
 
 /** Candidate provider: interview rounds of an agent (id + title). */
@@ -319,7 +330,12 @@ function interviewSpec(args: InterviewArgs): ElicitArg[] {
     case 'gap-check':
     case 'review':
     case 'inspect':
+    case 'export-sheet':
       spec.push(sessionArg(true));
+      break;
+    case 'import-answers':
+      spec.push(sessionArg(true));
+      spec.push({ name: 'sheet', required: true, label: '채워서 돌려받은 답변지 파일 경로', example: './answersheet-001.md' });
       break;
     case 'transcribe':
       // Model management (--download / --listModels) is session-independent.
@@ -379,6 +395,10 @@ export async function runInterview(args: InterviewArgs): Promise<ToolReply> {
         return abort(args);
       case 'transcribe':
         return transcribe(args);
+      case 'export-sheet':
+        return exportSheet(args);
+      case 'import-answers':
+        return importAnswers(args);
       default:
         return errorReply(`Unknown action: ${sanitisePromptLine(args.action, 40)}`);
     }
@@ -553,12 +573,21 @@ async function start(args: InterviewArgs): Promise<ToolReply> {
   lines.push('');
   if (session.kind === 'annotation') {
     lines.push('다음: action=annotate 로 인계자 주석을 추가하세요 (topic + note).');
+  } else if (session.mode === 'async') {
+    // 파일 기반(비동기) 인터뷰 — 질문을 모아 답변지로 내보내고, 채워서 돌려받아 반영.
+    lines.push('다음 (async · 파일 인터뷰):');
+    lines.push(`  · action=add-question   — 물어볼 질문들 추가`);
+    lines.push(`  · action=export-sheet   — 답변지 파일 생성 → 퇴사자에게 전달`);
+    lines.push(`  · action=import-answers — 채워서 돌려받은 답변지(--sheet) 반영`);
+    lines.push(`  · action=attach         — 음성/영상 첨부 (선택)`);
   } else {
-    lines.push('다음:');
+    // 실시간(대면, sync) 인터뷰 — 그 자리에서 답변을 바로 기록.
+    lines.push('다음 (sync · 실시간 인터뷰):');
     lines.push(`  · action=add-question  — 질문 추가`);
-    lines.push(`  · action=answer        — 답변 기록 (id + answer + source)`);
+    lines.push(`  · action=answer        — 답변 그 자리에서 기록 (id + answer + source)`);
     lines.push(`  · action=gap-check     — 빠진 부분 자동 감지 (Claude 가 후속 질문 생성)`);
     lines.push(`  · action=attach        — 음성/영상 첨부`);
+    lines.push(`  · (파일로 받고 싶으면 start 시 mode=async → export-sheet/import-answers)`);
   }
   lines.push(`  · action=finalize      — 서명 (interview 는 interviewer + interviewee 둘 다)`);
 
@@ -1366,6 +1395,187 @@ async function abort(args: InterviewArgs): Promise<ToolReply> {
     meta: { sessionId: session.sessionId },
   });
   return { content: [{ type: 'text', text: `회차 #${session.sessionId} 폐기됨.` }] };
+}
+
+/* --------------------------------------------------------------- */
+/* export-sheet / import-answers  (async file-based interview)      */
+/* --------------------------------------------------------------- */
+
+const SHEET_PLACEHOLDER = '<여기에 답변 / write your answer here>';
+const MAX_SHEET_BYTES = 5 * 1024 * 1024; // 5 MB
+
+/**
+ * Write a fillable answer sheet for the session's PENDING questions. The
+ * interviewer hands this file to the (possibly remote / async) interviewee;
+ * they type answers under each `[A]` and return it for `import-answers`. The
+ * `=== <id>` markers make round-trip matching deterministic. Always written
+ * PLAINTEXT (it's an outbound artifact for a human), even if at-rest
+ * encryption is enabled for transcripts.
+ */
+async function exportSheet(args: InterviewArgs): Promise<ToolReply> {
+  const loaded = await loadSession(args.slug, args.session);
+  if ('error' in loaded) return errorReply(loaded.error);
+  const session = loaded;
+  if (session.status !== 'open') return errorReply(`회차 #${session.sessionId} 는 ${session.status} 상태라 답변지를 만들 수 없습니다.`);
+  if (session.kind === 'annotation') return errorReply('annotation 회차는 답변지 대신 action=annotate 를 사용하세요.');
+
+  const pending = session.questions.filter((q) => q.status === 'pending');
+  if (pending.length === 0) {
+    return errorReply('pending 상태의 질문이 없습니다. 먼저 action=add-question 으로 질문을 추가하세요.');
+  }
+
+  const persona = await readPersona(args.slug).catch(() => null);
+  const lines: string[] = [];
+  lines.push(`# Afterglow 인터뷰 답변지 — ${sanitisePromptLine(persona?.name ?? args.slug, 60)} · #${session.sessionId} "${sanitisePromptLine(session.title, 120)}"`);
+  lines.push(`# 진행자: ${sanitisePromptLine(session.participants.interviewer, 60)}`
+    + (session.participants.interviewee ? ` · 인터뷰이: ${sanitisePromptLine(session.participants.interviewee, 60)}` : ''));
+  lines.push('#');
+  lines.push('# 사용법: 각 [A] 아래 줄에 답을 적어 저장한 뒤 진행자에게 돌려주세요.');
+  lines.push('#   · 답하지 않을 질문은 [A] 아래에 "(declined)" 만 적으세요.');
+  lines.push('#   · "=== <id>" 와 [Q]/[A] 마커는 지우지 마세요 (자동 인식용).');
+  lines.push('');
+  for (const q of pending) {
+    lines.push(`=== ${q.id}`);
+    lines.push(`[Q] ${sanitisePromptText(q.question, 2_000).replace(/\n/g, ' ')}`);
+    lines.push('[A]');
+    lines.push(SHEET_PLACEHOLDER);
+    lines.push('');
+  }
+  const body = lines.join('\n');
+
+  // Resolve output path: explicit --sheet (confined) or default in session dir.
+  let outPath: string;
+  if (args.sheet) {
+    const resolved = safeInputPath(args.sheet, args.slug);
+    if (typeof resolved !== 'string') return errorReply(`답변지 경로 거부: ${resolved.error}`);
+    outPath = resolved;
+  } else {
+    const dir = interviewSessionDir(args.slug, session.sessionId);
+    await fs.mkdir(dir, { recursive: true });
+    outPath = resolve(dir, `answersheet-${session.sessionId}.md`);
+  }
+  await fs.writeFile(outPath, body, 'utf8');
+
+  await appendHistory(args.slug, `interview export-sheet #${session.sessionId} (${pending.length} questions) → ${outPath}`);
+  await auditAppend({
+    tool: 'afterglow_interview',
+    slug: args.slug,
+    summary: `interview export-sheet · ${session.sessionId} · ${pending.length} q`,
+    meta: { sessionId: session.sessionId, questions: pending.length, output: outPath },
+  });
+
+  const out: string[] = [];
+  out.push(`✦ 답변지 생성: ${pending.length}개 질문 (#${session.sessionId}).`);
+  out.push(`  파일: ${outPath}`);
+  out.push('');
+  out.push('  다음:');
+  out.push('    1) 이 파일을 퇴사자(인터뷰이)에게 전달 → [A] 아래에 답변 작성 후 회신.');
+  out.push(`    2) 받은 파일을 반영: action=import-answers --session ${session.sessionId} --sheet <받은파일경로>`);
+  return { content: [{ type: 'text', text: out.join('\n') }] };
+}
+
+interface ParsedAnswer {
+  id: string;
+  answer: string;
+}
+
+/** Parse a filled answer sheet into {id, answer} blocks keyed by the
+ *  `=== <id>` markers. The answer is everything after the `[A]` line until the
+ *  next `=== ` marker (or EOF), trimmed. */
+function parseAnswerSheet(text: string): ParsedAnswer[] {
+  const out: ParsedAnswer[] = [];
+  // Normalise line endings; split into id-delimited blocks.
+  const norm = text.replace(/\r\n?/g, '\n');
+  const blocks = norm.split(/^===[ \t]+/m).slice(1); // first chunk is the header
+  for (const block of blocks) {
+    const nl = block.indexOf('\n');
+    if (nl < 0) continue;
+    const id = block.slice(0, nl).trim();
+    if (!id) continue;
+    const rest = block.slice(nl + 1);
+    const aIdx = rest.search(/^\[A\][ \t]*$/m);
+    if (aIdx < 0) continue;
+    // text after the [A] marker line
+    const afterA = rest.slice(rest.indexOf('\n', aIdx) + 1);
+    const answer = afterA.replace(/\n{3,}/g, '\n\n').trim();
+    out.push({ id, answer });
+  }
+  return out;
+}
+
+/**
+ * Read a filled answer sheet and apply it to the session: record each matched
+ * answer (source defaults to self-typed — the interviewee authored it offline),
+ * honour "(declined)", and skip empty / placeholder / unknown-id entries.
+ */
+async function importAnswers(args: InterviewArgs): Promise<ToolReply> {
+  const loaded = await loadSession(args.slug, args.session);
+  if ('error' in loaded) return errorReply(loaded.error);
+  const session = loaded;
+  if (session.status !== 'open') return errorReply(`회차 #${session.sessionId} 는 ${session.status} 상태입니다.`);
+  if (!args.sheet) return errorReply('import-answers 에는 sheet(채운 답변지 경로)가 필요합니다.');
+
+  const resolved = safeInputPath(args.sheet, args.slug);
+  if (typeof resolved !== 'string') return errorReply(`답변지 거부: ${resolved.error}`);
+  let raw: string;
+  try {
+    const buf = await fs.readFile(resolved);
+    if (buf.length > MAX_SHEET_BYTES) return errorReply(`답변지가 너무 큽니다 (${(buf.length / 1024 / 1024).toFixed(1)}MB > 5MB).`);
+    raw = buf.toString('utf8');
+  } catch (e) {
+    return errorReply(`답변지를 읽을 수 없습니다: ${sanitisePromptLine((e as Error).message, 300)}`);
+  }
+
+  const parsed = parseAnswerSheet(raw);
+  if (parsed.length === 0) {
+    return errorReply('답변지에서 "=== <id>" 블록을 찾지 못했습니다. export-sheet 로 만든 형식인지 확인하세요.');
+  }
+
+  const source = args.source ?? 'self-typed';
+  const applied: string[] = [];
+  const declined: string[] = [];
+  const skipped: string[] = [];
+  const unknown: string[] = [];
+  for (const { id, answer } of parsed) {
+    const q = session.questions.find((x) => x.id === id);
+    if (!q) { unknown.push(id); continue; }
+    if (q.status !== 'pending') { skipped.push(`${id}(이미 ${q.status})`); continue; }
+    const trimmed = answer.trim();
+    if (trimmed.length === 0 || trimmed === SHEET_PLACEHOLDER) { skipped.push(`${id}(빈칸)`); continue; }
+    if (/^\(?\s*declined\s*\)?$/i.test(trimmed) || trimmed === '(declined)') {
+      q.status = 'declined';
+      q.answeredAt = new Date().toISOString();
+      declined.push(id);
+      continue;
+    }
+    q.status = 'answered';
+    q.answer = trimmed.slice(0, 8_000);
+    q.answerSource = source;
+    q.answeredAt = new Date().toISOString();
+    applied.push(id);
+  }
+
+  await writeInterviewSession(args.slug, session);
+  await appendHistory(args.slug, `interview import-answers #${session.sessionId} (applied ${applied.length}, declined ${declined.length}, skipped ${skipped.length}, unknown ${unknown.length})`);
+  await auditAppend({
+    tool: 'afterglow_interview',
+    slug: args.slug,
+    summary: `interview import-answers · ${session.sessionId} · +${applied.length}`,
+    meta: { sessionId: session.sessionId, applied: applied.length, declined: declined.length, skipped: skipped.length, unknown: unknown.length, source },
+  });
+
+  const t = tallyQuestions(session.questions);
+  const out: string[] = [];
+  out.push(`✦ 답변지 반영 (#${session.sessionId}): 적용 ${applied.length} · 거절 ${declined.length} · 건너뜀 ${skipped.length} · 미매칭 ${unknown.length}`);
+  out.push(`  진행: pending ${t.pending} · answered ${t.answered} · declined ${t.declined} · skipped ${t.skipped} (출처 ${source})`);
+  if (unknown.length > 0) out.push(`  ⚠ 미매칭 id (이 회차에 없음): ${unknown.slice(0, 10).map((s) => sanitisePromptLine(s, 40)).join(', ')}`);
+  out.push('');
+  if (t.pending > 0) {
+    out.push(`  남은 pending ${t.pending}개 — 추가 답변지(export-sheet) 또는 직접 action=answer.`);
+  } else {
+    out.push('  모든 질문 처리 완료. action=gap-check 로 점검하거나 action=finalize 로 서명하세요.');
+  }
+  return { content: [{ type: 'text', text: out.join('\n') }] };
 }
 
 /* --------------------------------------------------------------- */

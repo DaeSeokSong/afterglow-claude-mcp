@@ -163,7 +163,7 @@ claude /afterglow ask jiyoon "..."
 | 명령 | 인자 | 설명 | 예시 |
 | --- | --- | --- | --- |
 | `afterglow:handoff` | `slug` `action`(start\|review\|status\|finalize\|abort) (`signer`) | 본인 인계 셀프 검수 | `handoff → slug:jiyoon, action:start` |
-| `afterglow:interview` | `slug` `action`(start\|add-question\|answer\|gap-check\|suggest-questions\|attach\|review\|annotate\|status\|list\|inspect\|finalize\|abort\|transcribe) (`session` `title` `interviewer`) | 인계자 주도 다중 인터뷰 | `interview → slug:jiyoon, action:start, title:결제 갭, interviewer:김후임` |
+| `afterglow:interview` | `slug` `action`(start\|add-question\|answer\|gap-check\|suggest-questions\|attach\|review\|annotate\|status\|list\|inspect\|finalize\|abort\|transcribe\|export-sheet\|import-answers) (`session` `title` `interviewer` `mode` `sheet`) | 인계자 주도 다중 인터뷰 (실시간 sync / 파일 async) | `interview → slug:jiyoon, action:start, mode:async` |
 | `afterglow:council` | `slugs` `question` | 합동 회의 | `council → slugs:jiyoon,jaehoon, question:온보딩이 결제에 영향?` |
 | `afterglow:council-summary` | (`file`) | 회의록 자동 요약 | `council-summary` |
 
@@ -368,7 +368,7 @@ Afterglow/
 │  │  ├─ portable.ts       ← 번들 manifest + 해시 + 인젝션 스캔
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 24 도구: …+ interview · export · import · verify · status · gc
-│  └─ test/                ← vitest 261 + stdio 핸드셰이크 (24 도구)
+│  └─ test/                ← vitest 269 + stdio 핸드셰이크 (24 도구)
 │
 └─ docs/
    └─ design-source/       ← claude.ai/design 핸드오프 원본 (JSX) — 참조용
@@ -448,7 +448,7 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 
 ## 🗺 Roadmap
 
-### 현재 (v0.8.0)
+### 현재 (v0.9.0)
 - [x] 18 화면 인터랙티브 제안서 (Vite + React 19 + TS)
 - [x] Cmd+K 팔레트 + 키보드 단축키 + 화면 간 클릭 네비
 - [x] **MCP 서버 24 도구**: `init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · **`interview`** · **`export`** · **`import`** · **`verify`** · **`status`** · **`gc`**
@@ -471,8 +471,9 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 - [x] **PII 마스킹 + 저장 암호화** — 전사본에 한해 이메일·전화·주민번호·카드·토큰 마스킹(`AFTERGLOW_PII_REDACT=1`) + AES-256-GCM 암호화(`AFTERGLOW_ENCRYPTION_KEY`). RAG 는 투명 복호화로 그대로 검색
 - [x] **신규 인터뷰 자동 질문 제안** — `interview start` 시 4-신호 갭 분석을 동봉하고 "이 질문들로 진행할까요?" 를 자동으로 물어봄 (`suggest=false` 로 해제)
 - [x] **인자 자동 안내(elicitation)** — 필수 인자를 비우고 실행하면 도구가 번호 선택지(+`직접 입력`) 와 `[필수]`/`[선택]` 표기로 안내. 후보는 동적(기존 slug·action enum·회차 id·대기 질문 id 등)
+- [x] **인터뷰 진행 방식 선택** — 실시간(`mode=sync`, 그 자리에서 `answer`) vs **파일 기반**(`mode=async` → `export-sheet` 로 답변지 생성 → 퇴사자가 채워서 회신 → `import-answers` 로 반영)
 - [x] **슬래시 명령** `/mcp__afterglow__<이름>` — MCP prompt 24종(도구 전부)으로 `afterglow:` 입력→Tab 호출
-- [x] vitest 261개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
+- [x] vitest 269개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 - [x] **핸즈온 Jupyter 노트북** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — 초보자용 전 기능 따라하기
 

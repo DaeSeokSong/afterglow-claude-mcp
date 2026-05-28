@@ -211,7 +211,7 @@ sequenceDiagram
     </tr>
     <tr>
       <td><code>afterglow_interview</code> <sub>v0.2</sub></td>
-      <td><code>/afterglow interview &lt;slug&gt; --action start|add-question|answer|gap-check|attach|annotate|status|list|inspect|finalize|abort|transcribe</code></td>
+      <td><code>/afterglow interview &lt;slug&gt; --action start|add-question|answer|gap-check|attach|annotate|status|list|inspect|finalize|abort|transcribe|export-sheet|import-answers</code></td>
       <td><b>인계자 주도 다중 인터뷰.</b> <code>handoff</code>(본인 1회 셀프검수)와 달리 인계자(인터뷰어)가 퇴사자(인터뷰이)를 <b>회차 무제한</b> 인터뷰. <code>gap-check</code>는 빠진 부분을 4신호로 자동 감지(LLM 비호출), <code>attach</code>는 음성·영상 첨부(transcript만 RAG 인덱싱), <code>annotate</code>는 인터뷰이 부재 시 인계자 주석, <code>finalize</code>는 인터뷰어+인터뷰이 <b>이중 서명</b>. 답변은 <code>persona.bio</code> 의 <code>## 인터뷰 보강 #N</code> 블록으로 누적.</td>
     </tr>
     <tr>
@@ -413,7 +413,7 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (261 tests — +edge 24 +elicit 9 +v08 17, etc.)
+npm test                   # vitest (269 tests — +sheet 8 +edge 24 +elicit 9, etc.)
 npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (24 도구 모두 happy-path + v0.3 기능 라운드트립)
 npm run test:all           # 전체 (unit → build → stdio)
 ```
@@ -519,8 +519,9 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 - [x] **PII 마스킹 + 저장 암호화** — 전사본 한정 (`AFTERGLOW_PII_REDACT` / `AFTERGLOW_ENCRYPTION_KEY` AES-256-GCM), RAG 투명 복호화
 - [x] **신규 인터뷰 자동 질문 제안** — `interview start` 에 4-신호 갭 분석 + "진행할까요?" 자동 질문 동봉 (`suggest=false` 로 해제)
 - [x] **인자 자동 안내(elicitation)** — 필수 인자 누락 시 번호 선택지 + `[필수]`/`[선택]` 표기로 안내 (필수 인자 있는 도구 전체). 스키마는 optional + handler 에서 검증/안내
+- [x] **인터뷰 진행 방식 선택** — 실시간(`mode=sync`·`answer`) / 파일 기반(`mode=async` → `export-sheet`→채움→`import-answers`)
 - [x] **MCP prompts → 슬래시 명령** `/mcp__afterglow__<이름>` (24종 — 도구 전부 1:1, `afterglow:` 입력→Tab, 인자 자동완성)
-- [x] vitest 261개 + 24 도구 stdio 핸드셰이크 (prompts 포함)
+- [x] vitest 269개 + 24 도구 stdio 핸드셰이크 (prompts 포함)
 - [ ] per-tool ACL · Web companion · 정기 retention 자동화
 - [ ] knowledge 파일까지 확장한 일괄 암호화/복호화 도구 · 외부 STT(Tier 2) 어댑터
 
