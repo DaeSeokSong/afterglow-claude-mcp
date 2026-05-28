@@ -368,7 +368,7 @@ Afterglow/
 │  │  ├─ portable.ts       ← 번들 manifest + 해시 + 인젝션 스캔
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 24 도구: …+ interview · export · import · verify · status · gc
-│  └─ test/                ← vitest 269 + stdio 핸드셰이크 (24 도구)
+│  └─ test/                ← vitest 273 + stdio 핸드셰이크 (24 도구)
 │
 └─ docs/
    └─ design-source/       ← claude.ai/design 핸드오프 원본 (JSX) — 참조용
@@ -471,9 +471,9 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 - [x] **PII 마스킹 + 저장 암호화** — 전사본에 한해 이메일·전화·주민번호·카드·토큰 마스킹(`AFTERGLOW_PII_REDACT=1`) + AES-256-GCM 암호화(`AFTERGLOW_ENCRYPTION_KEY`). RAG 는 투명 복호화로 그대로 검색
 - [x] **신규 인터뷰 자동 질문 제안** — `interview start` 시 4-신호 갭 분석을 동봉하고 "이 질문들로 진행할까요?" 를 자동으로 물어봄 (`suggest=false` 로 해제)
 - [x] **인자 자동 안내(elicitation)** — 필수 인자를 비우고 실행하면 도구가 번호 선택지(+`직접 입력`) 와 `[필수]`/`[선택]` 표기로 안내. 후보는 동적(기존 slug·action enum·회차 id·대기 질문 id 등)
-- [x] **인터뷰 진행 방식 선택** — 실시간(`mode=sync`, 그 자리에서 `answer`) vs **파일 기반**(`mode=async` → `export-sheet` 로 답변지 생성 → 퇴사자가 채워서 회신 → `import-answers` 로 반영)
+- [x] **인터뷰 진행 방식 선택** — 실시간(`mode=sync`, 그 자리에서 `answer`) vs **파일 기반**(`mode=async`): `export-sheet` 가 **자체완결 HTML 답변지**(체크박스 UI: 답변함/거절/해당없음/의미없음 · `localStorage` 자동저장 — 닫았다 다시 열어도 복원) 또는 `--format md` 로 마크다운. 퇴사자가 "답변 JSON 내려받기" 로 회신 → `import-answers` 가 JSON/MD 자동 감지 후 반영
 - [x] **슬래시 명령** `/mcp__afterglow__<이름>` — MCP prompt 24종(도구 전부)으로 `afterglow:` 입력→Tab 호출
-- [x] vitest 269개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
+- [x] vitest 273개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 - [x] **핸즈온 Jupyter 노트북** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — 초보자용 전 기능 따라하기
 

@@ -80,6 +80,11 @@ export const InterviewQuestionSchema = z
     // Provenance for questions surfaced by gap-check.
     fromGap: GapSignalSchema.optional(),
     gapNote: z.string().max(2_000).optional(),
+    // For status='skipped' from the HTML answer sheet — distinguishes
+    // "doesn't apply to me" from "meaningless question" (vs the catch-all
+    // 'declined' which means the interviewee actively refuses to answer).
+    skipReason: z.enum(['n/a', 'meaningless', 'other']).optional(),
+    skipNote: z.string().max(2_000).optional(),
   })
   .strict();
 export type InterviewQuestion = z.infer<typeof InterviewQuestionSchema>;
