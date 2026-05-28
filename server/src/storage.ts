@@ -144,6 +144,13 @@ export function correctionsLogPath(slug: string): string {
   return join(agentDir(slug), 'corrections.log');
 }
 
+/** JSONL log of Claude's composed answers, captured back via
+ *  `afterglow_correct --action record-answer`. Separate from corrections.log
+ *  because the semantic is archival, not corrective. */
+export function answersLogPath(slug: string): string {
+  return join(agentDir(slug), 'answers.log');
+}
+
 export function interviewsDir(slug: string): string {
   return join(agentDir(slug), 'interviews');
 }
@@ -1192,6 +1199,52 @@ export async function appendCorrection(slug: string, entry: CorrectionEntry): Pr
       'utf8',
     );
   });
+}
+
+/* --------------------------------------------------------------- */
+/* Recorded answers (Phase P2)                                     */
+/* --------------------------------------------------------------- */
+
+export interface RecordedAnswerEntry {
+  ts: string;
+  question: string;
+  answer: string;
+  confidence?: number;
+  sources?: string[];
+  caller?: string;
+}
+
+export async function appendAnswerLog(slug: string, entry: RecordedAnswerEntry): Promise<void> {
+  return withLock(`answers:${slug}`, async () => {
+    await fs.mkdir(agentDir(slug), { recursive: true });
+    // JSONL — each line is one structured record. Easier to grep / diff than
+    // a custom space-separated format and lets the `list` view show structured
+    // fields without re-parsing free-text.
+    await fs.appendFile(answersLogPath(slug), JSON.stringify(entry) + '\n', 'utf8');
+  });
+}
+
+export async function readAnswerLog(slug: string): Promise<RecordedAnswerEntry[]> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(answersLogPath(slug), 'utf8');
+  } catch {
+    return [];
+  }
+  const out: RecordedAnswerEntry[] = [];
+  for (const line of raw.split('\n')) {
+    const t = line.trim();
+    if (!t) continue;
+    try {
+      const parsed = JSON.parse(t) as RecordedAnswerEntry;
+      if (parsed && typeof parsed.ts === 'string' && typeof parsed.question === 'string' && typeof parsed.answer === 'string') {
+        out.push(parsed);
+      }
+    } catch {
+      // skip malformed lines defensively
+    }
+  }
+  return out;
 }
 
 export async function readCorrections(slug: string): Promise<CorrectionEntry[]> {

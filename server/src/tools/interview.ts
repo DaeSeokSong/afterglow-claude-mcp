@@ -1347,8 +1347,13 @@ async function absorbIntoPersona(slug: string, session: InterviewSession): Promi
 
   await snapshotPersona(slug, `interview ${session.sessionId} (pre)`);
   const persona = await readPersona(slug);
-  const bio = persona.bio ? `${persona.bio}\n\n${block}` : block;
-  persona.bio = bio.slice(0, 20_000);
+  const combined = persona.bio ? `${persona.bio}\n\n${block}` : block;
+  // Fit-from-the-front: when the combined bio overflows the cap, drop the
+  // OLDEST absorbed blocks (matched by their `## 인터뷰 보강 / 인계자 주석`
+  // heading) first so the newly-finalized interview is always preserved.
+  // (The previous behaviour — `slice(0, 20_000)` — silently dropped the new
+  // content whenever bio approached the cap.)
+  persona.bio = fitBio(combined, 20_000);
   persona.updatedAt = new Date().toISOString();
   const parsed = PersonaSchema.safeParse(persona);
   if (!parsed.success) {
@@ -1360,6 +1365,33 @@ async function absorbIntoPersona(slug: string, session: InterviewSession): Promi
   await writeSystemPrompt(slug, renderSystemPrompt(parsed.data));
   await snapshotPersona(slug, `interview ${session.sessionId} (post)`);
   return true;
+}
+
+/**
+ * Trim a bio to `limit` chars by dropping OLDEST absorbed-interview blocks
+ * first (anything before the first remaining `## 인터뷰 보강` / `## 인계자
+ * 주석` heading is the persona's original intro — kept). Only when no
+ * absorbed blocks remain and the residual is still over the cap do we fall
+ * through to a tail-keep (preserve the newest tail content).
+ */
+function fitBio(combined: string, limit: number): string {
+  if (combined.length <= limit) return combined;
+  const headingRe = /\n*##\s+(?:인터뷰 보강|인계자 주석)\s+#/;
+  while (combined.length > limit) {
+    const first = headingRe.exec(combined);
+    if (!first) break;
+    const start = first.index;
+    const rest = combined.slice(start + 1);
+    const nextRel = headingRe.exec(rest);
+    const end = nextRel ? start + 1 + nextRel.index : combined.length;
+    combined = combined.slice(0, start) + combined.slice(end);
+  }
+  if (combined.length > limit) {
+    // Intro alone exceeds the cap — keep the newest tail, the most recent
+    // content the user actually authored.
+    combined = combined.slice(combined.length - limit);
+  }
+  return combined.replace(/\n{3,}/g, '\n\n').trimEnd();
 }
 
 /** Append an interview/annotation entry to provenance.postImportActivity if

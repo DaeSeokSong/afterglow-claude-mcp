@@ -369,7 +369,7 @@ Afterglow/
 │  │  ├─ rag.ts            ← BM25 / dense / hybrid retrieval (knowledge/ + interview transcripts)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 22 tools: …18 above… + interview · export · import · verify
-│  └─ test/                ← 273 vitest + stdio handshake (covers all 24 tools)
+│  └─ test/                ← 284 vitest + stdio handshake (covers all 24 tools)
 │
 └─ docs/
    └─ design-source/       ← original claude.ai/design hand-off (JSX) — reference
@@ -422,7 +422,7 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 273 vitest tests
+npm test             # 284 vitest tests
 npm run test:stdio   # real MCP stdio handshake (all 24 tools + v0.3/v0.4 round-trips)
 npm run test:all     # unit → build → stdio
 ```
@@ -437,7 +437,7 @@ Afterglow v0.2.0 is a **proof of concept**. Things to know before pulling it int
 | **RAG indexing** | `.md` / `.txt` / `.csv` / `.jsonl` only — no PDF parsing | Convert PDFs to `.md` externally before dropping in |
 | **`audit.log` scale** | Every verify reads the whole file and re-hashes | At tens of thousands of rows, add chunked checkpoints |
 | **`.versions/` retention** | Every edit / sign / handoff / rollback is a permanent snapshot | Periodic manual pruning (`rm` + sync `tags.json`) |
-| **`afterglow_correct` ACL** | `access.json` gates `ask` only — correct accepts any caller | Add per-tool ACL wrapper for production |
+| **Mutator per-tool ACL** | `correct` · `edit` · `recalibrate apply` · `version` (rollback·tag·snapshot) all honour the agent's access policy via `caller`; remaining mutators (`handoff`·`interview`·`archive`·`gc`·`import`) still TBD | Extend the gate to the rest |
 | **GDPR delete** | `archive` only moves to `archive/<slug>/` — not real deletion | After retention window, manual `rm -rf` + registry edit |
 | **Multi-process** | In-process locks only — assumes one stdio server | Externalise to Redis/DB mutex for distributed runs |
 | **Side-log integrity** | Only `audit.log` is hash-chained — `history.log` / `consent.md` etc are plain text | Hash sibling files into audit `meta` for full coverage |
@@ -473,8 +473,11 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 - [x] **Auto question-suggestion on new interview** — `interview start` embeds a 4-signal gap analysis and asks "proceed with these questions?" (disable with `suggest=false`)
 - [x] **Missing-argument elicitation** — omit a required arg and the tool returns numbered choices (+ "type your own") with `[필수]`/`[선택]` tags; candidates are dynamic (existing slugs · action enums · session ids · pending question ids)
 - [x] **Choose how interviews run** — real-time (`mode=sync`, record `answer` live) vs file-based (`mode=async`): `export-sheet` writes a self-contained **HTML form** by default (checkbox UI: answered / declined / N/A / meaningless · `localStorage` auto-save — closing and reopening restores progress) or `--format md` for Markdown. The interviewee hits "Download answers (JSON)" → `import-answers` auto-detects JSON/MD and ingests it
+- [x] **Close the audit loop / record-answer** — `correct --action record-answer` archives the answer Claude composed (question · answer · confidence · sources) into `answers.log`; `correct list` shows it alongside corrections. Previously `ask` only returned a context bundle and the actual answer never came back into Afterglow
+- [x] **Mutator per-tool ACL** — `correct` · `edit` · `recalibrate apply` · `version` (rollback·tag·snapshot) now honour the agent's access policy via a `caller` arg (required when policy is deny-default)
+- [x] **persona.bio truncation fix** — when bio overflows 20k, the *oldest* absorbed interview blocks are dropped first (previously the new block was silently discarded). `renderInterviewBlock` now also includes the `skipped` (N/A / meaningless) section so future asks know which areas the interviewee marked off-limits
 - [x] **Slash commands** `/mcp__afterglow__<name>` — 24 MCP prompts (one per tool) — type `afterglow:` → Tab to invoke
-- [x] 273 vitest + extended stdio handshake (covers all 24 tools + prompts)
+- [x] 284 vitest + extended stdio handshake (covers all 24 tools + prompts)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 - [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
 

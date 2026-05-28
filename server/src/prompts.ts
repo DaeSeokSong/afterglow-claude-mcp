@@ -265,16 +265,20 @@ export function registerPrompts(server: McpServer): void {
   server.registerPrompt(
     'correct',
     {
-      title: 'Afterglow: 신뢰도 수동 보정',
-      description: 'ask 결과 피드백·답변편집·규칙저장 (afterglow_correct)',
+      title: 'Afterglow: 신뢰도 수동 보정 / 답변 회수',
+      description: 'ask 피드백·답변편집·규칙저장·Claude 가 만든 답변 회수 (afterglow_correct)',
       argsSchema: {
         slug: z.string().describe('대상 slug'),
-        action: z.string().describe('feedback | edit-answer | save-rule | list'),
+        action: z.string().describe('feedback | edit-answer | save-rule | record-answer | list'),
         feedback: z.string().optional().describe('피드백/규칙 본문'),
         recordId: z.string().optional().describe('대상 ask 레코드 id (선택)'),
+        question: z.string().optional().describe('record-answer 시 ask 때 했던 질문'),
+        answer: z.string().optional().describe('record-answer 시 Claude 가 만든 답변 본문'),
+        caller: z.string().optional().describe('호출자(user:|role:|team:) — 정책 deny 시 필수'),
       },
     },
-    async ({ slug, action, feedback, recordId }) => ask(`Afterglow \`afterglow_correct\` 도구를 호출해줘: ${kv({ slug, action, feedback, recordId })}`),
+    async ({ slug, action, feedback, recordId, question, answer, caller }) =>
+      ask(`Afterglow \`afterglow_correct\` 도구를 호출해줘: ${kv({ slug, action, feedback, recordId, question, answer, caller })}`),
   );
 
   server.registerPrompt(
