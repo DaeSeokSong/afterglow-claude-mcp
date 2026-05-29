@@ -10,6 +10,7 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { sanitisePromptLine } from '../sanitize.js';
+import { assertAccessAllowed } from './acl.js';
 import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
@@ -23,11 +24,13 @@ export const archiveShape = {
     .min(1)
     .optional()
     .describe('archive / restore 시 필수. list 시 무시.'),
+  caller: z.string().max(80).optional().describe('호출자 식별 (user:|role:|team:). archive/restore 에 access policy gate.'),
 } as const;
 
 interface ArchiveArgs {
   action: 'archive' | 'restore' | 'list';
   slug?: string;
+  caller?: string;
 }
 
 /**
@@ -82,6 +85,11 @@ export async function runArchive(args: ArchiveArgs): Promise<ToolReply> {
     if (!args.slug) {
       return errorReply(`action=${args.action} 에는 slug 가 필요합니다.`);
     }
+
+    // Per-tool ACL gate — archive/restore mutate the agent folder + registry,
+    // so honour the access policy just like the other mutator tools.
+    const denied = await assertAccessAllowed(args.slug, args.caller, 'archive');
+    if (denied) return denied;
 
     if (args.action === 'archive') {
       // History MUST be written before the rename — otherwise appendHistory

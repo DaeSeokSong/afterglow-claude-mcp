@@ -25,6 +25,7 @@ import {
 import { append as auditAppend } from '../audit.js';
 import { PersonaSchema, renderSystemPrompt } from '../persona.js';
 import { sanitisePromptLine, sanitisePromptText } from '../sanitize.js';
+import { assertAccessAllowed } from './acl.js';
 import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
@@ -99,6 +100,7 @@ export const handoffShape = {
     .max(2_000)
     .optional()
     .describe('finalize 시 추가 인터뷰 허용 범위/제한 (예: "결제·온보딩 한정, 인사평가 거부").'),
+  caller: z.string().max(80).optional().describe('호출자 식별 (user:|role:|team:). mutator 액션(start/review/finalize/abort) 에 access policy gate.'),
 } as const;
 
 interface HandoffArgs {
@@ -113,6 +115,7 @@ interface HandoffArgs {
   allowFollowupInterview?: boolean;
   allowProxyAnnotation?: boolean;
   followupScope?: string;
+  caller?: string;
 }
 
 /* --------------------------------------------------------------- */
@@ -176,12 +179,16 @@ export async function runHandoff(args: HandoffArgs): Promise<ToolReply> {
       return errorReply((e as Error).message);
     }
     // Refuse mutating actions on archived agents (status is read-only).
+    // Then apply per-tool ACL — closes the gap the README flagged for write
+    // tools, now consistent with correct / edit / recalibrate / version.
     if (args.action !== 'status') {
       try {
         await assertWritable(args.slug);
       } catch (e) {
         return errorReply((e as Error).message);
       }
+      const denied = await assertAccessAllowed(args.slug, args.caller, 'handoff');
+      if (denied) return denied;
     }
 
     switch (args.action) {

@@ -50,12 +50,31 @@ export async function runVerify(args: VerifyArgs): Promise<ToolReply> {
     const reports: AgentValidation[] = [];
     let kind: 'bundle' | 'folder';
 
+    let signatureLine: string | null = null;
     if (await isBundleDir(inputDir)) {
       kind = 'bundle';
       const manifest = await readManifest(inputDir);
       if (!manifest.includedVersions) exclude.add('.versions');
       for (const a of manifest.agents) {
         reports.push(await validateAgentSource(join(inputDir, 'agents', a.slug), exclude, a.folderHash));
+      }
+      // Phase P3 — surface the manifest signature status. Present + verifies
+      // → trustworthy. Present + fails → likely tampered. Absent → unsigned
+      // (back-compat with pre-v0.10 bundles, no failure).
+      if (manifest.signature && manifest.bundleHash) {
+        const { verifyPayload, fingerprintPublicKey } = await import('../keys.js');
+        const ok = verifyPayload(manifest.bundleHash, manifest.signature.publicKey, manifest.signature.signature);
+        const fp = fingerprintPublicKey(manifest.signature.publicKey);
+        const who = sanitisePromptLine(manifest.signature.signer ?? '(이름 없음)', 80);
+        signatureLine = ok
+          ? `서명: ✓ 검증 통과 — signer="${who}" · 키 지문 ${fp}`
+          : `서명: ✗ 검증 실패 — manifest 가 서명 이후 변조됐을 가능성 (signer="${who}", 키 지문 ${fp})`;
+        if (!ok) {
+          // Surface as a top-level red flag in the summary report.
+          reports.forEach((r) => r.injectionWarnings.push('manifest signature verification failed'));
+        }
+      } else {
+        signatureLine = '서명: (없음) — 이 번들은 서명되지 않은 사전-v0.10 또는 비서명 export 입니다.';
       }
     } else if (await isAgentFolder(inputDir)) {
       kind = 'folder';
@@ -74,6 +93,10 @@ export async function runVerify(args: VerifyArgs): Promise<ToolReply> {
     const lines: string[] = [];
     lines.push(`# afterglow verify · ${kind} · ${inputDir}`);
     lines.push('');
+    if (signatureLine) {
+      lines.push(signatureLine);
+      lines.push('');
+    }
     let allGood = true;
     for (const v of reports) {
       const blocking = !v.schemaOk || v.hashMatches === false;

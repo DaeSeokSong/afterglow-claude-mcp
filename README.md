@@ -368,7 +368,7 @@ Afterglow/
 │  │  ├─ portable.ts       ← 번들 manifest + 해시 + 인젝션 스캔
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 24 도구: …+ interview · export · import · verify · status · gc
-│  └─ test/                ← vitest 284 + stdio 핸드셰이크 (24 도구)
+│  └─ test/                ← vitest 296 + stdio 핸드셰이크 (24 도구)
 │
 └─ docs/
    └─ design-source/       ← claude.ai/design 핸드오프 원본 (JSX) — 참조용
@@ -436,7 +436,7 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 | **RAG 인덱싱** | `.md`/`.txt`/`.csv`/`.jsonl` 만 — PDF/PPT 미지원 | 외부 추출 후 `.md` 로 변환 |
 | **`audit.log` 스케일** | 매 verify 마다 전체 read + 해시 재계산 | 수만 줄 누적 시 분할 / 체크포인트 필요 |
 | **`.versions/` 보존** | 모든 edit/sign/handoff/rollback 이 영구 스냅샷 | 정기적 수동 정리 (`rm` + `tags.json` 동기화) |
-| **mutator per-tool ACL** | `correct` · `edit` · `recalibrate apply` · `version` (rollback·tag·snapshot) 모두 `caller` + access policy gate 적용 — 나머지(`handoff`·`interview`·`archive`·`gc`·`import`)는 아직 미적용 | 남은 mutator 까지 일괄 적용 |
+| **mutator per-tool ACL** | `correct`·`edit`·`recalibrate apply`·`version`(rollback·tag·snapshot)·`handoff`·`interview`(변경 액션)·`archive`(archive/restore)·`gc`(apply+slug) 모두 `caller` + access policy 적용 (v0.10). 단, `import` 는 새 에이전트를 만드는 동작이라 per-agent 정책으로 가두는 게 의미 없음 — 전역 import allowlist 가 필요 | import 용 전역 정책 |
 | **GDPR 삭제** | `archive` 는 `archive/<slug>/` 로 이동만 — 실제 삭제 아님 | 만료 후 수동 `rm -rf` + registry 정리 |
 | **다중 프로세스** | in-process lock 만 — 단일 stdio 서버 가정 | 분산 운영 시 외부 mutex (Redis/DB) 필요 |
 | **사이드 로그 무결성** | `audit.log` 만 해시 체인 — `history.log` / `consent.md` 등은 평문 | 운영 시 sibling 파일도 audit meta 에 해시 |
@@ -475,8 +475,13 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 - [x] **답변 회수 / 감사 루프 닫기** — `correct --action record-answer` 로 Claude 가 만든 답변(질문·답·신뢰도·출처)을 `answers.log` 에 회수 저장 → `correct list` 에 보정 기록과 함께 표시. 그동안 ask 가 컨텍스트 번들만 돌려주고 "실제 답변"이 Afterglow 에 안 남던 감사 공백을 메움
 - [x] **mutator per-tool ACL** — `correct` · `edit` · `recalibrate apply` · `version`(rollback·tag·snapshot) 이 `caller` + agent 의 access policy 게이트를 받음 (deny 정책일 때 `caller` 필수)
 - [x] **persona.bio 잘림 버그 수정** — 누적이 20k 초과 시 *오래된* 인터뷰 보강 블록부터 드롭(이전엔 새 블록을 버림). `renderInterviewBlock` 에 `skipped`(해당없음/의미없음) 섹션 추가 — 본인이 표시한 N/A 정보가 persona.bio 에 흡수돼서 다음 ask 가 짐작하지 않음
+- [x] **mutator ACL 전체 확대 (v0.10)** — `handoff` · `interview` 변경 액션 · `archive`(archive/restore) · `gc`(apply+slug 지정 시) 까지 `caller` + access policy gate 적용. read-only / 모델 관리는 통과
+- [x] **번들 매니페스트 Ed25519 서명 (v0.10, P3 minimum)** — `export` 가 로컬 키페어로 `bundleHash` 를 서명하고 공개키 + 서명자 이름을 매니페스트에 동봉(TOFU). `verify`/`import` 가 검증 — 변조 시 import 거부(강행은 `acceptBrokenChain`). 사전-v0.10 비서명 번들은 "unsigned" 로 그대로 받음
+- [x] **데이터 주체 종합 export (v0.10, P4 minimum)** — `correct --action data-subject-export` 가 페르소나·동의·인터뷰·history·corrections·answers·provenance·audit 건수까지 한 번에 JSON 으로 덤프. 읽기전용
+- [x] **status 정밀화 (v0.10)** — 에이전트별 staleness(`lastActivityAt`/`staleDays`, 30일+은 🕰), dense RAG 실패 카운터(`denseFailures`/`denseLastError`) 표시
+- [x] **HTML 답변지 크로스-디바이스 (v0.10)** — "진행 저장(파일)" / "진행 불러오기" 버튼 — localStorage 한계를 넘어 다른 기기에서 이어쓰기
 - [x] **슬래시 명령** `/mcp__afterglow__<이름>` — MCP prompt 24종(도구 전부)으로 `afterglow:` 입력→Tab 호출
-- [x] vitest 284개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
+- [x] vitest 296개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 - [x] **핸즈온 Jupyter 노트북** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — 초보자용 전 기능 따라하기
 

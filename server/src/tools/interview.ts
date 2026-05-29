@@ -52,6 +52,7 @@ import {
   whisperEngine,
   type WasmResult,
 } from '../whisper.js';
+import { assertAccessAllowed } from './acl.js';
 import { elicitMissing, slugCandidates, type ElicitArg, type ElicitCandidate } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
@@ -214,6 +215,7 @@ export const interviewShape = {
     .max(200)
     .optional()
     .describe('--download 시 모델 크기(tiny|base|small|medium|large-v3), 또는 --apply 시 모델 파일 경로 override.'),
+  caller: z.string().max(80).optional().describe('호출자 식별 (user:|role:|team:). mutator 액션에 access policy gate (read-only · 모델 관리 액션은 제외).'),
 } as const;
 
 interface InterviewArgs {
@@ -256,6 +258,7 @@ interface InterviewArgs {
   download?: boolean;
   listModels?: boolean;
   model?: string;
+  caller?: string;
 }
 
 /* --------------------------------------------------------------- */
@@ -362,12 +365,22 @@ export async function runInterview(args: InterviewArgs): Promise<ToolReply> {
       return errorReply((e as Error).message);
     }
     // Read-only actions are allowed on archived agents; mutating ones are not.
-    const readOnly = args.action === 'status' || args.action === 'list' || args.action === 'inspect';
+    // Plus extras that touch the audit/history log but don't mutate session
+    // state (gap-check, suggest-questions) — we let those through anonymously.
+    const readOnly = args.action === 'status' || args.action === 'list' || args.action === 'inspect'
+      || args.action === 'gap-check' || args.action === 'suggest-questions';
     if (!readOnly) {
       try {
         await assertWritable(args.slug);
       } catch (e) {
         return errorReply((e as Error).message);
+      }
+      // Per-tool ACL gate. Transcribe sub-modes that only manage downloaded
+      // models (download / listModels) are agent-independent and exempted.
+      const transcribeModelMgmt = args.action === 'transcribe' && (!!args.download || !!args.listModels);
+      if (!transcribeModelMgmt) {
+        const denied = await assertAccessAllowed(args.slug, args.caller, 'interview');
+        if (denied) return denied;
       }
     }
 
@@ -1659,12 +1672,48 @@ function renderAnswerSheetHtml(
     localStorage.removeItem(STORAGE_KEY);
     location.reload();
   }
+  /* Cross-device progress save/load (Phase 4 refinement) — localStorage is
+     per-browser, so the interviewee couldn't pick up on a different machine.
+     "진행 저장(파일)" downloads the current in-progress state as a portable
+     JSON file; "진행 불러오기" reads that file back into the form + storage. */
+  function saveProgress() {
+    const payload = { savedAt: new Date().toISOString(), slug: SLUG, sessionId: SESSION_ID, state: readForm() };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'progress-' + SESSION_ID + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    $('#status').textContent = '진행 상태 파일로 저장됨 — 다른 기기에서 "진행 불러오기" 로 이어쓸 수 있어요.';
+  }
+  function loadProgress(ev) {
+    const file = ev && ev.target && ev.target.files && ev.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const obj = JSON.parse(String(reader.result));
+        if (!obj || !Array.isArray(obj.state)) throw new Error('진행 파일 형식이 다릅니다.');
+        if (obj.sessionId && obj.sessionId !== SESSION_ID) {
+          if (!confirm('다른 회차(' + obj.sessionId + ') 의 진행 파일입니다. 그래도 불러올까요?')) return;
+        }
+        writeForm(obj.state);
+        save();
+        $('#status').textContent = '진행 파일 불러옴 (' + (obj.savedAt || '시각 미상') + ').';
+      } catch (e) {
+        $('#status').textContent = '⚠ 불러오기 실패: ' + (e && e.message ? e.message : e);
+      }
+    };
+    reader.readAsText(file);
+  }
   document.addEventListener('DOMContentLoaded', () => {
     restore();
     document.body.addEventListener('input', scheduleSave);
     document.body.addEventListener('change', scheduleSave);
     $('#dl').addEventListener('click', downloadJSON);
     $('#cl').addEventListener('click', clearSaved);
+    $('#sv').addEventListener('click', saveProgress);
+    $('#ld').addEventListener('change', loadProgress);
   });
 `;
 
@@ -1714,6 +1763,10 @@ function renderAnswerSheetHtml(
   <div class="bar">
     <span id="status">…</span>
     <button id="cl" class="ghost" type="button">처음부터</button>
+    <button id="sv" class="ghost" type="button">진행 저장(파일)</button>
+    <label class="ghost" for="ld" style="cursor:pointer;border:1px solid #B5482C;color:#B5482C;border-radius:6px;padding:8px 14px;">진행 불러오기
+      <input id="ld" type="file" accept="application/json,.json" style="display:none;">
+    </label>
     <button id="dl" type="button">답변 JSON 내려받기</button>
   </div>
 <script>

@@ -1,6 +1,6 @@
 {
   "name": "@daeseoksong/afterglow-mcp",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Afterglow MCP server — manage 퇴사자 에이전트 폴더 + persona + RAG, surfaced as Claude Code slash commands.",
   "type": "module",
   "license": "Apache-2.0",
