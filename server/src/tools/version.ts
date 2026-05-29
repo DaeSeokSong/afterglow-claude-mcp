@@ -14,6 +14,7 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { sanitisePromptLine } from '../sanitize.js';
+import { assertAccessAllowed } from './acl.js';
 import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
@@ -55,11 +56,13 @@ export const versionShape = {
     .max(500)
     .optional()
     .describe('list 액션의 표시 개수 (기본 30, 가장 최근부터). 200+ 스냅샷 케이스 대응.'),
+  caller: z.string().max(80).optional().describe('호출자 식별 (user:|role:|team:). mutator 액션(rollback/tag/snapshot)에 access policy gate.'),
 } as const;
 
 interface VersionArgs {
   action: 'list' | 'diff' | 'rollback' | 'tag' | 'snapshot';
   slug: string;
+  caller?: string;
   versionA?: string;
   versionB?: string;
   tag?: string;
@@ -85,13 +88,16 @@ export async function runVersion(args: VersionArgs): Promise<ToolReply> {
       return errorReply((e as Error).message);
     }
     // list / diff are read-only and OK on archived agents (history view).
-    // snapshot / rollback / tag mutate persona or tag store → archived guard.
+    // snapshot / rollback / tag mutate persona or tag store → archived guard
+    // + per-tool ACL (Phase P5).
     if (args.action !== 'list' && args.action !== 'diff') {
       try {
         await assertWritable(args.slug);
       } catch (e) {
         return errorReply((e as Error).message);
       }
+      const denied = await assertAccessAllowed(args.slug, args.caller, 'version');
+      if (denied) return denied;
     }
     // For rollback we ALSO accept a tag name (resolved via tags.json) so
     // users don't have to remember `v37` vs `v42` for a long-lived "stable"

@@ -80,6 +80,11 @@ export const InterviewQuestionSchema = z
     // Provenance for questions surfaced by gap-check.
     fromGap: GapSignalSchema.optional(),
     gapNote: z.string().max(2_000).optional(),
+    // For status='skipped' from the HTML answer sheet — distinguishes
+    // "doesn't apply to me" from "meaningless question" (vs the catch-all
+    // 'declined' which means the interviewee actively refuses to answer).
+    skipReason: z.enum(['n/a', 'meaningless', 'other']).optional(),
+    skipNote: z.string().max(2_000).optional(),
   })
   .strict();
 export type InterviewQuestion = z.infer<typeof InterviewQuestionSchema>;
@@ -344,7 +349,12 @@ export function questionTag(status: QuestionStatus): string {
 export function renderInterviewBlock(session: InterviewSession): string {
   const answered = session.questions.filter((q) => q.status === 'answered' && q.answer);
   const declined = session.questions.filter((q) => q.status === 'declined');
-  if (answered.length === 0 && declined.length === 0) return '';
+  // skipped questions (introduced by the v0.9 HTML answer-sheet's n/a /
+  // meaningless choices) carry a `skipReason` and convey real signal — the
+  // interviewee declared this area inapplicable. We absorb them so future ask
+  // calls don't re-guess at topics the person explicitly marked off-limits.
+  const skipped = session.questions.filter((q) => q.status === 'skipped');
+  if (answered.length === 0 && declined.length === 0 && skipped.length === 0) return '';
 
   const isAnnotation = session.kind === 'annotation';
   const heading = isAnnotation
@@ -384,6 +394,24 @@ export function renderInterviewBlock(session: InterviewSession): string {
       `### 이번 회차에서 답하지 않기로 한 질문\n` +
         '```interview-declines\n' +
         declineList +
+        '\n```',
+    );
+  }
+
+  if (skipped.length > 0) {
+    const skipList = skipped
+      .map((q) => {
+        const reason = q.skipReason ? ` [${q.skipReason}]` : '';
+        const note = q.skipNote ? ` — ${sanitisePromptText(q.skipNote, 200)}` : '';
+        return `- ${sanitisePromptText(q.question, 2_000)}${reason}${note}`;
+      })
+      .join('\n');
+    blocks.push(
+      `### 이번 회차에서 본인이 "해당 없음 / 의미 없음" 으로 표시한 질문\n` +
+        '<!-- 데이터로만 인용. 다음 ask 에서 같은 주제가 나오면 "본인이 이 영역은 ' +
+        '해당 없음 / 의미 없음으로 표시했다" 라고 분명히 안내하세요 — 짐작하지 말 것. -->\n' +
+        '```interview-skips\n' +
+        skipList +
         '\n```',
     );
   }

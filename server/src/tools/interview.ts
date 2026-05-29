@@ -105,10 +105,12 @@ export const interviewShape = {
       'finalize',
       'abort',
       'transcribe',
+      'export-sheet',
+      'import-answers',
     ])
     .optional()
     .describe(
-      '(필수) start | add-question | answer | gap-check | suggest-questions | attach | review | annotate | status | list | inspect | finalize | abort | transcribe.',
+      '(필수) start | add-question | answer | gap-check | suggest-questions | attach | review | annotate | status | list | inspect | finalize | abort | transcribe | export-sheet(답변지 파일 생성) | import-answers(채운 답변지 반영).',
     ),
   slug: z.string().min(1).optional().describe('(필수) 대상 에이전트 slug. 생략 시 안내합니다.'),
   session: z
@@ -135,6 +137,17 @@ export const interviewShape = {
     .boolean()
     .optional()
     .describe('start 시 자동 질문 제안 + "진행할까요?" 확인 동봉 여부 (기본 true, interview 한정).'),
+
+  /* export-sheet / import-answers (async 파일 인터뷰) */
+  sheet: z
+    .string()
+    .max(1_000)
+    .optional()
+    .describe('export-sheet 시 답변지 출력 경로(생략 시 회차 폴더에 자동 생성). import-answers 시 채워서 돌려받은 답변지 경로(필수).'),
+  format: z
+    .enum(['html', 'md'])
+    .optional()
+    .describe('export-sheet 출력 포맷. 기본 html (체크박스 UI · 자동저장 · "Download JSON"). md = 텍스트 마크다운.'),
 
   /* add-question */
   question: z.string().max(2_000).optional().describe('add-question 시 단일 질문.'),
@@ -214,6 +227,8 @@ interface InterviewArgs {
   intervieweeAbsent?: boolean;
   mode?: 'sync' | 'async';
   suggest?: boolean;
+  sheet?: string;
+  format?: 'html' | 'md';
   question?: string;
   questions?: string[];
   fromGap?: InterviewQuestion['fromGap'];
@@ -250,6 +265,7 @@ interface InterviewArgs {
 const INTERVIEW_ACTIONS = [
   'start', 'add-question', 'answer', 'gap-check', 'suggest-questions', 'attach',
   'review', 'annotate', 'status', 'list', 'inspect', 'finalize', 'abort', 'transcribe',
+  'export-sheet', 'import-answers',
 ] as const;
 
 /** Candidate provider: interview rounds of an agent (id + title). */
@@ -319,7 +335,12 @@ function interviewSpec(args: InterviewArgs): ElicitArg[] {
     case 'gap-check':
     case 'review':
     case 'inspect':
+    case 'export-sheet':
       spec.push(sessionArg(true));
+      break;
+    case 'import-answers':
+      spec.push(sessionArg(true));
+      spec.push({ name: 'sheet', required: true, label: '채워서 돌려받은 답변지 파일 경로', example: './answersheet-001.md' });
       break;
     case 'transcribe':
       // Model management (--download / --listModels) is session-independent.
@@ -379,6 +400,10 @@ export async function runInterview(args: InterviewArgs): Promise<ToolReply> {
         return abort(args);
       case 'transcribe':
         return transcribe(args);
+      case 'export-sheet':
+        return exportSheet(args);
+      case 'import-answers':
+        return importAnswers(args);
       default:
         return errorReply(`Unknown action: ${sanitisePromptLine(args.action, 40)}`);
     }
@@ -553,12 +578,21 @@ async function start(args: InterviewArgs): Promise<ToolReply> {
   lines.push('');
   if (session.kind === 'annotation') {
     lines.push('다음: action=annotate 로 인계자 주석을 추가하세요 (topic + note).');
+  } else if (session.mode === 'async') {
+    // 파일 기반(비동기) 인터뷰 — 질문을 모아 답변지로 내보내고, 채워서 돌려받아 반영.
+    lines.push('다음 (async · 파일 인터뷰):');
+    lines.push(`  · action=add-question   — 물어볼 질문들 추가`);
+    lines.push(`  · action=export-sheet   — 답변지 파일 생성 → 퇴사자에게 전달`);
+    lines.push(`  · action=import-answers — 채워서 돌려받은 답변지(--sheet) 반영`);
+    lines.push(`  · action=attach         — 음성/영상 첨부 (선택)`);
   } else {
-    lines.push('다음:');
+    // 실시간(대면, sync) 인터뷰 — 그 자리에서 답변을 바로 기록.
+    lines.push('다음 (sync · 실시간 인터뷰):');
     lines.push(`  · action=add-question  — 질문 추가`);
-    lines.push(`  · action=answer        — 답변 기록 (id + answer + source)`);
+    lines.push(`  · action=answer        — 답변 그 자리에서 기록 (id + answer + source)`);
     lines.push(`  · action=gap-check     — 빠진 부분 자동 감지 (Claude 가 후속 질문 생성)`);
     lines.push(`  · action=attach        — 음성/영상 첨부`);
+    lines.push(`  · (파일로 받고 싶으면 start 시 mode=async → export-sheet/import-answers)`);
   }
   lines.push(`  · action=finalize      — 서명 (interview 는 interviewer + interviewee 둘 다)`);
 
@@ -1313,8 +1347,13 @@ async function absorbIntoPersona(slug: string, session: InterviewSession): Promi
 
   await snapshotPersona(slug, `interview ${session.sessionId} (pre)`);
   const persona = await readPersona(slug);
-  const bio = persona.bio ? `${persona.bio}\n\n${block}` : block;
-  persona.bio = bio.slice(0, 20_000);
+  const combined = persona.bio ? `${persona.bio}\n\n${block}` : block;
+  // Fit-from-the-front: when the combined bio overflows the cap, drop the
+  // OLDEST absorbed blocks (matched by their `## 인터뷰 보강 / 인계자 주석`
+  // heading) first so the newly-finalized interview is always preserved.
+  // (The previous behaviour — `slice(0, 20_000)` — silently dropped the new
+  // content whenever bio approached the cap.)
+  persona.bio = fitBio(combined, 20_000);
   persona.updatedAt = new Date().toISOString();
   const parsed = PersonaSchema.safeParse(persona);
   if (!parsed.success) {
@@ -1326,6 +1365,33 @@ async function absorbIntoPersona(slug: string, session: InterviewSession): Promi
   await writeSystemPrompt(slug, renderSystemPrompt(parsed.data));
   await snapshotPersona(slug, `interview ${session.sessionId} (post)`);
   return true;
+}
+
+/**
+ * Trim a bio to `limit` chars by dropping OLDEST absorbed-interview blocks
+ * first (anything before the first remaining `## 인터뷰 보강` / `## 인계자
+ * 주석` heading is the persona's original intro — kept). Only when no
+ * absorbed blocks remain and the residual is still over the cap do we fall
+ * through to a tail-keep (preserve the newest tail content).
+ */
+function fitBio(combined: string, limit: number): string {
+  if (combined.length <= limit) return combined;
+  const headingRe = /\n*##\s+(?:인터뷰 보강|인계자 주석)\s+#/;
+  while (combined.length > limit) {
+    const first = headingRe.exec(combined);
+    if (!first) break;
+    const start = first.index;
+    const rest = combined.slice(start + 1);
+    const nextRel = headingRe.exec(rest);
+    const end = nextRel ? start + 1 + nextRel.index : combined.length;
+    combined = combined.slice(0, start) + combined.slice(end);
+  }
+  if (combined.length > limit) {
+    // Intro alone exceeds the cap — keep the newest tail, the most recent
+    // content the user actually authored.
+    combined = combined.slice(combined.length - limit);
+  }
+  return combined.replace(/\n{3,}/g, '\n\n').trimEnd();
 }
 
 /** Append an interview/annotation entry to provenance.postImportActivity if
@@ -1366,6 +1432,467 @@ async function abort(args: InterviewArgs): Promise<ToolReply> {
     meta: { sessionId: session.sessionId },
   });
   return { content: [{ type: 'text', text: `회차 #${session.sessionId} 폐기됨.` }] };
+}
+
+/* --------------------------------------------------------------- */
+/* export-sheet / import-answers  (async file-based interview)      */
+/* --------------------------------------------------------------- */
+
+const SHEET_PLACEHOLDER = '<여기에 답변 / write your answer here>';
+const MAX_SHEET_BYTES = 5 * 1024 * 1024; // 5 MB
+
+/**
+ * Write a fillable answer sheet for the session's PENDING questions in either
+ * HTML (default — self-contained form with checkboxes + localStorage
+ * auto-save) or Markdown. The interviewer hands the file to the (possibly
+ * remote / async) interviewee; they fill it and return either the saved JSON
+ * (HTML path) or the edited .md (text path) for `import-answers`. Always
+ * written PLAINTEXT (outbound human artifact), even with at-rest encryption.
+ */
+async function exportSheet(args: InterviewArgs): Promise<ToolReply> {
+  const loaded = await loadSession(args.slug, args.session);
+  if ('error' in loaded) return errorReply(loaded.error);
+  const session = loaded;
+  if (session.status !== 'open') return errorReply(`회차 #${session.sessionId} 는 ${session.status} 상태라 답변지를 만들 수 없습니다.`);
+  if (session.kind === 'annotation') return errorReply('annotation 회차는 답변지 대신 action=annotate 를 사용하세요.');
+
+  const pending = session.questions.filter((q) => q.status === 'pending');
+  if (pending.length === 0) {
+    return errorReply('pending 상태의 질문이 없습니다. 먼저 action=add-question 으로 질문을 추가하세요.');
+  }
+
+  const persona = await readPersona(args.slug).catch(() => null);
+  const format = args.format ?? 'html';
+  const body = format === 'html'
+    ? renderAnswerSheetHtml(args.slug, session, pending, persona?.name)
+    : renderAnswerSheetMd(session, pending, persona?.name);
+
+  // Resolve output path: explicit --sheet (confined) or default in session dir.
+  let outPath: string;
+  if (args.sheet) {
+    const resolved = safeInputPath(args.sheet, args.slug);
+    if (typeof resolved !== 'string') return errorReply(`답변지 경로 거부: ${resolved.error}`);
+    outPath = resolved;
+  } else {
+    const dir = interviewSessionDir(args.slug, session.sessionId);
+    await fs.mkdir(dir, { recursive: true });
+    outPath = resolve(dir, `answersheet-${session.sessionId}.${format === 'html' ? 'html' : 'md'}`);
+  }
+  await fs.writeFile(outPath, body, 'utf8');
+
+  await appendHistory(args.slug, `interview export-sheet #${session.sessionId} (${format}, ${pending.length} questions) → ${outPath}`);
+  await auditAppend({
+    tool: 'afterglow_interview',
+    slug: args.slug,
+    summary: `interview export-sheet · ${session.sessionId} · ${pending.length} q · ${format}`,
+    meta: { sessionId: session.sessionId, questions: pending.length, format, output: outPath },
+  });
+
+  const out: string[] = [];
+  out.push(`✦ 답변지 생성: ${pending.length}개 질문 (#${session.sessionId}, ${format}).`);
+  out.push(`  파일: ${outPath}`);
+  out.push('');
+  out.push('  다음:');
+  if (format === 'html') {
+    out.push('    1) 이 .html 파일을 퇴사자에게 전달 → 브라우저로 열어 폼 채우기 (입력 시마다 자동 저장됨).');
+    out.push(`    2) "Download JSON" 버튼으로 답변 파일을 받아 회신 (answers-${session.sessionId}.json).`);
+    out.push(`    3) 받은 JSON 을 반영: action=import-answers --session ${session.sessionId} --sheet <받은json>`);
+  } else {
+    out.push('    1) 이 .md 파일을 퇴사자에게 전달 → [A] 아래에 답변 작성 후 회신.');
+    out.push(`    2) 받은 파일을 반영: action=import-answers --session ${session.sessionId} --sheet <받은파일>`);
+  }
+  return { content: [{ type: 'text', text: out.join('\n') }] };
+}
+
+/** Render the legacy plain-Markdown answer sheet (`=== <id>` blocks). */
+function renderAnswerSheetMd(
+  session: InterviewSession,
+  pending: InterviewQuestion[],
+  agentName?: string,
+): string {
+  const lines: string[] = [];
+  lines.push(`# Afterglow 인터뷰 답변지 — ${sanitisePromptLine(agentName ?? session.slug, 60)} · #${session.sessionId} "${sanitisePromptLine(session.title, 120)}"`);
+  lines.push(`# 진행자: ${sanitisePromptLine(session.participants.interviewer, 60)}`
+    + (session.participants.interviewee ? ` · 인터뷰이: ${sanitisePromptLine(session.participants.interviewee, 60)}` : ''));
+  lines.push('#');
+  lines.push('# 사용법: 각 [A] 아래 줄에 답을 적어 저장한 뒤 진행자에게 돌려주세요.');
+  lines.push('#   · 답하지 않을 질문은 [A] 아래에 "(declined)" 만 적으세요.');
+  lines.push('#   · "=== <id>" 와 [Q]/[A] 마커는 지우지 마세요 (자동 인식용).');
+  lines.push('');
+  for (const q of pending) {
+    lines.push(`=== ${q.id}`);
+    lines.push(`[Q] ${sanitisePromptText(q.question, 2_000).replace(/\n/g, ' ')}`);
+    lines.push('[A]');
+    lines.push(SHEET_PLACEHOLDER);
+    lines.push('');
+  }
+  return lines.join('\n');
+}
+
+function escapeHtml(s: string): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/**
+ * Self-contained answer-sheet HTML — no external CSS/JS/CDN, works fully
+ * offline from `file://`. Per-question radio (답변함 / 거절 / 해당없음 /
+ * 의미없음) + textarea + optional skip-note; on every input the form state
+ * is debounce-saved to `localStorage` keyed by `afterglow:answers:<slug>:<sid>`
+ * so closing/reopening the file restores progress. A "Download JSON" button
+ * emits the structured payload `import-answers` consumes.
+ */
+function renderAnswerSheetHtml(
+  slug: string,
+  session: InterviewSession,
+  pending: InterviewQuestion[],
+  agentName?: string,
+): string {
+  const title = `Afterglow 답변지 · ${escapeHtml(agentName ?? slug)} · #${escapeHtml(session.sessionId)}`;
+  const heading = `${escapeHtml(agentName ?? slug)} · #${escapeHtml(session.sessionId)} "${escapeHtml(session.title)}"`;
+  const meta = `진행자: ${escapeHtml(session.participants.interviewer)}`
+    + (session.participants.interviewee ? ` · 인터뷰이: ${escapeHtml(session.participants.interviewee)}` : '');
+  const storageKey = `afterglow:answers:${slug}:${session.sessionId}`;
+  const downloadName = `answers-${session.sessionId}.json`;
+  const questionsJson = JSON.stringify(
+    pending.map((q) => ({ id: q.id, q: sanitisePromptText(q.question, 2_000).replace(/\n/g, ' ') })),
+  );
+
+  const cardsHtml = pending
+    .map(
+      (q, i) => `
+  <section class="card" data-qid="${escapeHtml(q.id)}">
+    <header><span class="num">${i + 1}.</span> <span class="qtext">${escapeHtml(q.question)}</span></header>
+    <div class="kind">
+      <label><input type="radio" name="kind-${escapeHtml(q.id)}" value="answered" checked> 답변함</label>
+      <label><input type="radio" name="kind-${escapeHtml(q.id)}" value="declined"> 답변 거절</label>
+      <label><input type="radio" name="kind-${escapeHtml(q.id)}" value="n/a"> 해당 없음</label>
+      <label><input type="radio" name="kind-${escapeHtml(q.id)}" value="meaningless"> 의미 없는 질문</label>
+    </div>
+    <textarea class="answer" rows="4" placeholder="여기에 답변..."></textarea>
+    <input class="note" type="text" placeholder="(선택) 사유 한 줄 — 해당없음/의미없음 일 때">
+  </section>`,
+    )
+    .join('');
+
+  // The JS block is template-literal-built but contains its own template
+  // literals; we keep it as a plain string so backslashes/braces stay verbatim.
+  const js = `
+  const STORAGE_KEY = ${JSON.stringify(storageKey)};
+  const SLUG = ${JSON.stringify(slug)};
+  const SESSION_ID = ${JSON.stringify(session.sessionId)};
+  const DOWNLOAD_NAME = ${JSON.stringify(downloadName)};
+
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+  function readForm() {
+    return $$('.card').map((card) => {
+      const id = card.dataset.qid;
+      const kind = (card.querySelector('input[type=radio]:checked') || {}).value || 'answered';
+      const answer = card.querySelector('.answer').value;
+      const note = card.querySelector('.note').value;
+      return { id, kind, answer, note };
+    });
+  }
+  function writeForm(state) {
+    if (!Array.isArray(state)) return;
+    for (const row of state) {
+      const card = document.querySelector('.card[data-qid="' + (row.id || '').replace(/"/g, '\\\\"') + '"]');
+      if (!card) continue;
+      const r = card.querySelector('input[type=radio][value="' + (row.kind || 'answered') + '"]');
+      if (r) r.checked = true;
+      if (typeof row.answer === 'string') card.querySelector('.answer').value = row.answer;
+      if (typeof row.note === 'string') card.querySelector('.note').value = row.note;
+    }
+  }
+  function save() {
+    try {
+      const payload = { savedAt: new Date().toISOString(), state: readForm() };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      $('#status').textContent = '자동 저장됨 · ' + new Date(payload.savedAt).toLocaleTimeString();
+    } catch (e) {
+      $('#status').textContent = '⚠ 자동 저장 실패: ' + (e && e.message ? e.message : e);
+    }
+  }
+  function restore() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) { $('#status').textContent = '새 답변지 — 입력하면 자동 저장됩니다.'; return; }
+      const { savedAt, state } = JSON.parse(raw);
+      writeForm(state);
+      $('#status').textContent = '복원됨 · 마지막 저장 ' + new Date(savedAt).toLocaleString();
+    } catch (e) {
+      $('#status').textContent = '⚠ 복원 실패: ' + (e && e.message ? e.message : e);
+    }
+  }
+  let debTimer = 0;
+  function scheduleSave() { clearTimeout(debTimer); debTimer = setTimeout(save, 300); }
+
+  function downloadJSON() {
+    const answers = readForm().map((r) => {
+      if (r.kind === 'answered') return { id: r.id, kind: 'answered', answer: r.answer };
+      if (r.kind === 'declined') return { id: r.id, kind: 'declined' };
+      return { id: r.id, kind: r.kind, note: r.note };
+    });
+    const out = {
+      afterglowAnswerSheet: 1,
+      slug: SLUG,
+      sessionId: SESSION_ID,
+      exportedAt: new Date().toISOString(),
+      answers,
+    };
+    const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = DOWNLOAD_NAME;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    $('#status').textContent = '다운로드 완료: ' + DOWNLOAD_NAME + ' — 진행자에게 회신하세요.';
+  }
+  function clearSaved() {
+    if (!confirm('지금까지 저장된 답변을 모두 지울까요? (이 파일에 한해 처음부터)')) return;
+    localStorage.removeItem(STORAGE_KEY);
+    location.reload();
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    restore();
+    document.body.addEventListener('input', scheduleSave);
+    document.body.addEventListener('change', scheduleSave);
+    $('#dl').addEventListener('click', downloadJSON);
+    $('#cl').addEventListener('click', clearSaved);
+  });
+`;
+
+  return `<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${title}</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans KR",sans-serif; max-width: 820px; margin: 0 auto; padding: 24px 20px 120px; color: #1c1813; background: #fdfaf3; }
+  @media (prefers-color-scheme: dark) { body { color: #ECE3D6; background: #1c1813; } }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .meta { color: #8a7e6a; font-size: 13px; margin-bottom: 18px; }
+  .guide { background: #f3ecdc; border-left: 3px solid #B5482C; padding: 10px 14px; border-radius: 6px; font-size: 13.5px; }
+  @media (prefers-color-scheme: dark) { .guide { background: #2b2620; } }
+  .card { border: 1px solid #d8cdb6; border-radius: 8px; padding: 14px 16px; margin: 14px 0; background: #fffdf6; }
+  @media (prefers-color-scheme: dark) { .card { background: #211d17; border-color: #3a342b; } }
+  .card header { margin-bottom: 10px; }
+  .num { color: #B5482C; font-weight: 600; margin-right: 4px; }
+  .qtext { font-weight: 600; }
+  .kind { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 10px; font-size: 13.5px; }
+  .kind label { cursor: pointer; }
+  textarea.answer, input.note { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #d8cdb6; border-radius: 6px; font: inherit; background: inherit; color: inherit; }
+  textarea.answer { resize: vertical; min-height: 70px; }
+  input.note { margin-top: 6px; }
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(255,253,246,0.95); border-top: 1px solid #d8cdb6; padding: 10px 20px; display: flex; gap: 12px; align-items: center; backdrop-filter: blur(4px); }
+  @media (prefers-color-scheme: dark) { .bar { background: rgba(28,24,19,0.95); border-color: #3a342b; } }
+  .bar #status { color: #8a7e6a; font-size: 13px; flex: 1; }
+  button { padding: 8px 14px; border-radius: 6px; border: 1px solid #B5482C; background: #B5482C; color: white; font: inherit; cursor: pointer; }
+  button.ghost { background: transparent; color: #B5482C; }
+  footer.foot { color: #8a7e6a; font-size: 12px; text-align: center; margin-top: 24px; }
+</style>
+</head>
+<body>
+  <h1>Afterglow 인터뷰 답변지</h1>
+  <div class="meta">${heading}<br>${meta}</div>
+  <div class="guide">
+    각 질문에 <b>답변함 / 거절 / 해당 없음 / 의미 없는 질문</b> 중 하나를 고르고, 답변하면 본문을 입력하세요.
+    입력은 <b>이 브라우저에 자동으로 저장</b>됩니다 — 닫았다 다시 열어도 진행 상태가 유지돼요.
+    다 적으면 아래의 <b>"답변 JSON 내려받기"</b> 버튼을 눌러 받은 파일을 진행자에게 회신하세요.
+  </div>
+  <form id="form">${cardsHtml}
+  </form>
+  <footer class="foot">data-questions: <code id="qmeta"></code></footer>
+  <div class="bar">
+    <span id="status">…</span>
+    <button id="cl" class="ghost" type="button">처음부터</button>
+    <button id="dl" type="button">답변 JSON 내려받기</button>
+  </div>
+<script>
+  document.getElementById('qmeta').textContent = ${JSON.stringify(`${pending.length} questions · ${session.sessionId}`)};
+  // Question manifest (read-only, for debugging / safety):
+  window.__afterglowQuestions = ${questionsJson};
+${js}
+</script>
+</body>
+</html>`;
+}
+
+type AnswerKind = 'answered' | 'declined' | 'n/a' | 'meaningless' | 'skipped';
+interface NormalizedEntry {
+  id: string;
+  kind: AnswerKind;
+  answer?: string;
+  note?: string;
+}
+
+/** Parse the legacy plain-Markdown sheet (`=== <id>` blocks) into normalized
+ *  entries. `(declined)` becomes a declined entry; everything else with a
+ *  non-empty, non-placeholder answer becomes an answered entry. */
+function parseMdSheet(text: string): NormalizedEntry[] {
+  const out: NormalizedEntry[] = [];
+  const norm = text.replace(/\r\n?/g, '\n');
+  const blocks = norm.split(/^===[ \t]+/m).slice(1); // first chunk is the header
+  for (const block of blocks) {
+    const nl = block.indexOf('\n');
+    if (nl < 0) continue;
+    const id = block.slice(0, nl).trim();
+    if (!id) continue;
+    const rest = block.slice(nl + 1);
+    const aIdx = rest.search(/^\[A\][ \t]*$/m);
+    if (aIdx < 0) continue;
+    const afterA = rest.slice(rest.indexOf('\n', aIdx) + 1);
+    const answer = afterA.replace(/\n{3,}/g, '\n\n').trim();
+    if (/^\(?\s*declined\s*\)?$/i.test(answer)) {
+      out.push({ id, kind: 'declined' });
+    } else if (answer.length === 0 || answer === SHEET_PLACEHOLDER) {
+      // skip placeholder/empty — produce no entry so the importer leaves pending
+    } else {
+      out.push({ id, kind: 'answered', answer });
+    }
+  }
+  return out;
+}
+
+/** Parse a JSON answer sheet emitted by the HTML form's "Download JSON"
+ *  button. Validates the envelope and the per-answer `kind`. */
+function parseJsonSheet(text: string): NormalizedEntry[] | { error: string } {
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch (e) { return { error: `JSON 파싱 실패: ${(e as Error).message}` }; }
+  const env = parsed as { afterglowAnswerSheet?: number; answers?: unknown };
+  if (!env || env.afterglowAnswerSheet !== 1 || !Array.isArray(env.answers)) {
+    return { error: 'JSON 형식이 다릅니다 (afterglowAnswerSheet:1 / answers[] 가 필요).' };
+  }
+  const out: NormalizedEntry[] = [];
+  for (const a of env.answers as Array<Record<string, unknown>>) {
+    const id = String(a.id ?? '').trim();
+    const kind = String(a.kind ?? '').trim() as AnswerKind;
+    if (!id || !['answered', 'declined', 'n/a', 'meaningless', 'skipped'].includes(kind)) continue;
+    const answer = typeof a.answer === 'string' ? a.answer : undefined;
+    const note = typeof a.note === 'string' ? a.note : undefined;
+    if (kind === 'answered') {
+      if (!answer || answer.trim().length === 0) continue; // empty answer → skip
+      out.push({ id, kind, answer: answer.trim() });
+    } else {
+      out.push({ id, kind, note });
+    }
+  }
+  return out;
+}
+
+/** Apply normalized entries to the session. Returns per-bucket id lists. */
+function applyEntries(
+  session: InterviewSession,
+  entries: NormalizedEntry[],
+  source: NonNullable<InterviewQuestion['answerSource']>,
+): { applied: string[]; declined: string[]; skipped: string[]; alreadyNonPending: string[]; unknown: string[] } {
+  const applied: string[] = [];
+  const declined: string[] = [];
+  const skipped: string[] = [];
+  const alreadyNonPending: string[] = [];
+  const unknown: string[] = [];
+  const now = new Date().toISOString();
+  for (const e of entries) {
+    const q = session.questions.find((x) => x.id === e.id);
+    if (!q) { unknown.push(e.id); continue; }
+    if (q.status !== 'pending') { alreadyNonPending.push(`${e.id}(이미 ${q.status})`); continue; }
+    if (e.kind === 'answered') {
+      if (!e.answer || e.answer.trim().length === 0) { skipped.push(`${e.id}(빈칸)`); continue; }
+      q.status = 'answered';
+      q.answer = e.answer.slice(0, 8_000);
+      q.answerSource = source;
+      q.answeredAt = now;
+      applied.push(e.id);
+    } else if (e.kind === 'declined') {
+      q.status = 'declined';
+      q.answeredAt = now;
+      declined.push(e.id);
+    } else {
+      // n/a · meaningless · skipped → status='skipped' + skipReason for the distinction.
+      q.status = 'skipped';
+      q.answeredAt = now;
+      q.skipReason = e.kind === 'n/a' ? 'n/a' : e.kind === 'meaningless' ? 'meaningless' : 'other';
+      if (e.note && e.note.trim().length > 0) q.skipNote = e.note.slice(0, 2_000);
+      skipped.push(`${e.id}(${e.kind})`);
+    }
+  }
+  return { applied, declined, skipped, alreadyNonPending, unknown };
+}
+
+/**
+ * Read a filled answer sheet (HTML-emitted JSON or legacy MD) and apply it to
+ * the session. Source defaults to `self-typed` — the interviewee authored the
+ * answers offline themselves. Skipped/declined/unknown counts are reported.
+ */
+async function importAnswers(args: InterviewArgs): Promise<ToolReply> {
+  const loaded = await loadSession(args.slug, args.session);
+  if ('error' in loaded) return errorReply(loaded.error);
+  const session = loaded;
+  if (session.status !== 'open') return errorReply(`회차 #${session.sessionId} 는 ${session.status} 상태입니다.`);
+  if (!args.sheet) return errorReply('import-answers 에는 sheet(채운 답변지 경로)가 필요합니다.');
+
+  const resolved = safeInputPath(args.sheet, args.slug);
+  if (typeof resolved !== 'string') return errorReply(`답변지 거부: ${resolved.error}`);
+  let raw: string;
+  try {
+    const buf = await fs.readFile(resolved);
+    if (buf.length > MAX_SHEET_BYTES) return errorReply(`답변지가 너무 큽니다 (${(buf.length / 1024 / 1024).toFixed(1)}MB > 5MB).`);
+    raw = buf.toString('utf8');
+  } catch (e) {
+    return errorReply(`답변지를 읽을 수 없습니다: ${sanitisePromptLine((e as Error).message, 300)}`);
+  }
+
+  // Format auto-detect: .json extension OR content starts with `{`.
+  const isJson = /\.json$/i.test(resolved) || raw.trimStart().startsWith('{');
+  let entries: NormalizedEntry[];
+  if (isJson) {
+    const parsed = parseJsonSheet(raw);
+    if (!Array.isArray(parsed)) return errorReply(`답변지 거부: ${parsed.error}`);
+    entries = parsed;
+  } else {
+    entries = parseMdSheet(raw);
+  }
+  if (entries.length === 0) {
+    return errorReply(isJson
+      ? 'JSON 답변지에서 유효한 answers[] 항목을 찾지 못했습니다.'
+      : '답변지에서 "=== <id>" 블록을 찾지 못했습니다. export-sheet 로 만든 형식인지 확인하세요.');
+  }
+
+  const source = args.source ?? 'self-typed';
+  const { applied, declined, skipped, alreadyNonPending, unknown } = applyEntries(session, entries, source);
+
+  await writeInterviewSession(args.slug, session);
+  await appendHistory(
+    args.slug,
+    `interview import-answers #${session.sessionId} (${isJson ? 'json' : 'md'}, applied ${applied.length}, declined ${declined.length}, skipped ${skipped.length}, unknown ${unknown.length})`,
+  );
+  await auditAppend({
+    tool: 'afterglow_interview',
+    slug: args.slug,
+    summary: `interview import-answers · ${session.sessionId} · +${applied.length} · ${isJson ? 'json' : 'md'}`,
+    meta: { sessionId: session.sessionId, format: isJson ? 'json' : 'md', applied: applied.length, declined: declined.length, skipped: skipped.length, unknown: unknown.length, source },
+  });
+
+  const t = tallyQuestions(session.questions);
+  const out: string[] = [];
+  out.push(`✦ 답변지 반영 (#${session.sessionId}, ${isJson ? 'json' : 'md'}): 적용 ${applied.length} · 거절 ${declined.length} · 건너뜀 ${skipped.length + alreadyNonPending.length} · 미매칭 ${unknown.length}`);
+  out.push(`  진행: pending ${t.pending} · answered ${t.answered} · declined ${t.declined} · skipped ${t.skipped} (출처 ${source})`);
+  if (unknown.length > 0) out.push(`  ⚠ 미매칭 id (이 회차에 없음): ${unknown.slice(0, 10).map((s) => sanitisePromptLine(s, 40)).join(', ')}`);
+  out.push('');
+  if (t.pending > 0) {
+    out.push(`  남은 pending ${t.pending}개 — 추가 답변지(export-sheet) 또는 직접 action=answer.`);
+  } else {
+    out.push('  모든 질문 처리 완료. action=gap-check 로 점검하거나 action=finalize 로 서명하세요.');
+  }
+  return { content: [{ type: 'text', text: out.join('\n') }] };
 }
 
 /* --------------------------------------------------------------- */

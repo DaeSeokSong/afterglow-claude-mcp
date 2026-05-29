@@ -12,6 +12,7 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { PersonaSchema, renderSystemPrompt, type Persona } from '../persona.js';
+import { assertAccessAllowed } from './acl.js';
 import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
@@ -31,6 +32,7 @@ export const recalibrateShape = {
     .describe(
       '토픽별(expertise-aware) 분석 모드. 각 ask 를 페르소나의 expertise 키워드와 매칭해 in-expertise vs out-of-expertise 신뢰도 통계와 expertise 조정 제안을 출력합니다. 자동 적용은 안 함 (진단).',
     ),
+  caller: z.string().max(80).optional().describe('호출자 식별 (user:|role:|team:). apply=true 시 access policy gate.'),
 } as const;
 
 interface RecalibrateArgs {
@@ -38,6 +40,7 @@ interface RecalibrateArgs {
   apply?: boolean;
   minSample?: number;
   byTopic?: boolean;
+  caller?: string;
 }
 
 /* --------------------------------------------------------------- */
@@ -470,6 +473,10 @@ export async function runRecalibrate(args: RecalibrateArgs): Promise<ToolReply> 
       lines.push('(dry-run) 적용하려면 같은 명령에 --apply 추가.');
       return { content: [{ type: 'text', text: lines.join('\n') }] };
     }
+
+    // Per-tool ACL (Phase P5) — apply mutates persona; gate via access policy.
+    const denied = await assertAccessAllowed(args.slug, args.caller, 'recalibrate');
+    if (denied) return denied;
 
     // Apply
     const next: Persona = JSON.parse(JSON.stringify(persona)) as Persona;

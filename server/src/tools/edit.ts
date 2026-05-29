@@ -22,6 +22,7 @@ import {
   type Source,
   type Tone,
 } from '../persona.js';
+import { assertAccessAllowed } from './acl.js';
 import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
@@ -80,6 +81,9 @@ export const editShape = {
   open: z.boolean().optional(),
   /** 에디터로 직접 수정한 persona.json 을 재검증 + system-prompt.md 재생성 + 스냅샷. */
   revalidate: z.boolean().optional(),
+
+  /** 호출자 식별 (user:|role:|team:). access policy 가 deny 규칙이 있을 때 필수. */
+  caller: z.string().max(80).optional(),
 } as const;
 
 interface EditArgs {
@@ -102,6 +106,7 @@ interface EditArgs {
   dryRun?: boolean;
   open?: boolean;
   revalidate?: boolean;
+  caller?: string;
 }
 
 function uniq<T>(xs: T[]): T[] {
@@ -158,6 +163,9 @@ export async function runEdit(args: EditArgs): Promise<ToolReply> {
     } catch (e) {
       return errorReply((e as Error).message);
     }
+    // Per-tool ACL (Phase P5) — edit mutates persona; gate via access policy.
+    const deniedEdit = await assertAccessAllowed(args.slug, args.caller, 'edit');
+    if (deniedEdit) return deniedEdit;
 
     // ── Editor mode: point the user at the raw file (vim/code/…) ──
     if (args.open) {

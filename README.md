@@ -152,7 +152,7 @@ claude /afterglow ask jiyoon "..."
 #### 운영 · 신뢰 · 권한 · 감사
 | 명령 | 인자 | 설명 | 예시 |
 | --- | --- | --- | --- |
-| `afterglow:correct` | `slug` `action`(feedback\|edit-answer\|save-rule\|list) (`feedback` `recordId`) | 수동 보정 | `correct → slug:jiyoon, action:feedback, feedback:정산은 주1회` |
+| `afterglow:correct` | `slug` `action`(feedback\|edit-answer\|save-rule\|**record-answer**\|list) (`feedback` `recordId` `question` `answer` `caller`) | 수동 보정 + **Claude 가 만든 답변 회수 저장** (audit 루프) | `correct → slug:jiyoon, action:record-answer, question:...,  answer:..., confidence:91` |
 | `afterglow:recalibrate` | `slug` (`byTopic` `apply`) | 신뢰도 자동 보정 | `recalibrate → slug:jiyoon, apply:true` |
 | `afterglow:access` | `slug` `action`(list\|allow\|deny\|remove\|set-default\|check) (`rule` `caller`) | 호출 권한 정책 | `access → slug:jiyoon, action:allow, rule:user:ykhyun` |
 | `afterglow:audit` | (`slug` `fast` `checkpoint`) | 감사 로그 + 무결성 검증 | `audit → checkpoint:true` |
@@ -163,7 +163,7 @@ claude /afterglow ask jiyoon "..."
 | 명령 | 인자 | 설명 | 예시 |
 | --- | --- | --- | --- |
 | `afterglow:handoff` | `slug` `action`(start\|review\|status\|finalize\|abort) (`signer`) | 본인 인계 셀프 검수 | `handoff → slug:jiyoon, action:start` |
-| `afterglow:interview` | `slug` `action`(start\|add-question\|answer\|gap-check\|suggest-questions\|attach\|review\|annotate\|status\|list\|inspect\|finalize\|abort\|transcribe) (`session` `title` `interviewer`) | 인계자 주도 다중 인터뷰 | `interview → slug:jiyoon, action:start, title:결제 갭, interviewer:김후임` |
+| `afterglow:interview` | `slug` `action`(start\|add-question\|answer\|gap-check\|suggest-questions\|attach\|review\|annotate\|status\|list\|inspect\|finalize\|abort\|transcribe\|export-sheet\|import-answers) (`session` `title` `interviewer` `mode` `sheet`) | 인계자 주도 다중 인터뷰 (실시간 sync / 파일 async) | `interview → slug:jiyoon, action:start, mode:async` |
 | `afterglow:council` | `slugs` `question` | 합동 회의 | `council → slugs:jiyoon,jaehoon, question:온보딩이 결제에 영향?` |
 | `afterglow:council-summary` | (`file`) | 회의록 자동 요약 | `council-summary` |
 
@@ -368,7 +368,7 @@ Afterglow/
 │  │  ├─ portable.ts       ← 번들 manifest + 해시 + 인젝션 스캔
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 24 도구: …+ interview · export · import · verify · status · gc
-│  └─ test/                ← vitest 261 + stdio 핸드셰이크 (24 도구)
+│  └─ test/                ← vitest 284 + stdio 핸드셰이크 (24 도구)
 │
 └─ docs/
    └─ design-source/       ← claude.ai/design 핸드오프 원본 (JSX) — 참조용
@@ -436,7 +436,7 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 | **RAG 인덱싱** | `.md`/`.txt`/`.csv`/`.jsonl` 만 — PDF/PPT 미지원 | 외부 추출 후 `.md` 로 변환 |
 | **`audit.log` 스케일** | 매 verify 마다 전체 read + 해시 재계산 | 수만 줄 누적 시 분할 / 체크포인트 필요 |
 | **`.versions/` 보존** | 모든 edit/sign/handoff/rollback 이 영구 스냅샷 | 정기적 수동 정리 (`rm` + `tags.json` 동기화) |
-| **`afterglow_correct` 권한** | `access.json` 은 `ask` 에만 적용 — correct 는 무차별 호출 | 운영 시 wrapper 로 per-tool ACL 추가 |
+| **mutator per-tool ACL** | `correct` · `edit` · `recalibrate apply` · `version` (rollback·tag·snapshot) 모두 `caller` + access policy gate 적용 — 나머지(`handoff`·`interview`·`archive`·`gc`·`import`)는 아직 미적용 | 남은 mutator 까지 일괄 적용 |
 | **GDPR 삭제** | `archive` 는 `archive/<slug>/` 로 이동만 — 실제 삭제 아님 | 만료 후 수동 `rm -rf` + registry 정리 |
 | **다중 프로세스** | in-process lock 만 — 단일 stdio 서버 가정 | 분산 운영 시 외부 mutex (Redis/DB) 필요 |
 | **사이드 로그 무결성** | `audit.log` 만 해시 체인 — `history.log` / `consent.md` 등은 평문 | 운영 시 sibling 파일도 audit meta 에 해시 |
@@ -448,7 +448,7 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 
 ## 🗺 Roadmap
 
-### 현재 (v0.8.0)
+### 현재 (v0.9.0)
 - [x] 18 화면 인터랙티브 제안서 (Vite + React 19 + TS)
 - [x] Cmd+K 팔레트 + 키보드 단축키 + 화면 간 클릭 네비
 - [x] **MCP 서버 24 도구**: `init` · `create` · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · **`interview`** · **`export`** · **`import`** · **`verify`** · **`status`** · **`gc`**
@@ -471,8 +471,12 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 - [x] **PII 마스킹 + 저장 암호화** — 전사본에 한해 이메일·전화·주민번호·카드·토큰 마스킹(`AFTERGLOW_PII_REDACT=1`) + AES-256-GCM 암호화(`AFTERGLOW_ENCRYPTION_KEY`). RAG 는 투명 복호화로 그대로 검색
 - [x] **신규 인터뷰 자동 질문 제안** — `interview start` 시 4-신호 갭 분석을 동봉하고 "이 질문들로 진행할까요?" 를 자동으로 물어봄 (`suggest=false` 로 해제)
 - [x] **인자 자동 안내(elicitation)** — 필수 인자를 비우고 실행하면 도구가 번호 선택지(+`직접 입력`) 와 `[필수]`/`[선택]` 표기로 안내. 후보는 동적(기존 slug·action enum·회차 id·대기 질문 id 등)
+- [x] **인터뷰 진행 방식 선택** — 실시간(`mode=sync`, 그 자리에서 `answer`) vs **파일 기반**(`mode=async`): `export-sheet` 가 **자체완결 HTML 답변지**(체크박스 UI: 답변함/거절/해당없음/의미없음 · `localStorage` 자동저장 — 닫았다 다시 열어도 복원) 또는 `--format md` 로 마크다운. 퇴사자가 "답변 JSON 내려받기" 로 회신 → `import-answers` 가 JSON/MD 자동 감지 후 반영
+- [x] **답변 회수 / 감사 루프 닫기** — `correct --action record-answer` 로 Claude 가 만든 답변(질문·답·신뢰도·출처)을 `answers.log` 에 회수 저장 → `correct list` 에 보정 기록과 함께 표시. 그동안 ask 가 컨텍스트 번들만 돌려주고 "실제 답변"이 Afterglow 에 안 남던 감사 공백을 메움
+- [x] **mutator per-tool ACL** — `correct` · `edit` · `recalibrate apply` · `version`(rollback·tag·snapshot) 이 `caller` + agent 의 access policy 게이트를 받음 (deny 정책일 때 `caller` 필수)
+- [x] **persona.bio 잘림 버그 수정** — 누적이 20k 초과 시 *오래된* 인터뷰 보강 블록부터 드롭(이전엔 새 블록을 버림). `renderInterviewBlock` 에 `skipped`(해당없음/의미없음) 섹션 추가 — 본인이 표시한 N/A 정보가 persona.bio 에 흡수돼서 다음 ask 가 짐작하지 않음
 - [x] **슬래시 명령** `/mcp__afterglow__<이름>` — MCP prompt 24종(도구 전부)으로 `afterglow:` 입력→Tab 호출
-- [x] vitest 261개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
+- [x] vitest 284개 + stdio 핸드셰이크 (24 도구 + prompts 검증)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 - [x] **핸즈온 Jupyter 노트북** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — 초보자용 전 기능 따라하기
 

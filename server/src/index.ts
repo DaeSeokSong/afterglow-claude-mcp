@@ -26,7 +26,7 @@
  *   - afterglow_archive          (/afterglow archive <slug> --action archive|restore|list)
  *   - afterglow_version          (/afterglow version <slug> --action list|diff|rollback|tag|snapshot)
  *   - afterglow_access           (/afterglow access <slug> --action list|allow|deny|set-default|check)
- *   - afterglow_interview        (/afterglow interview <slug> --action start|add-question|answer|gap-check|attach|review|annotate|status|list|inspect|finalize|abort|transcribe)
+ *   - afterglow_interview        (/afterglow interview <slug> --action start|add-question|answer|gap-check|attach|review|annotate|status|list|inspect|finalize|abort|transcribe|export-sheet|import-answers)
  *   - afterglow_export           (/afterglow export --slugs … | --all)
  *   - afterglow_import           (/afterglow import <path> [--as | --merge | --dryRun | --expectAnchor])
  *   - afterglow_verify           (/afterglow verify <path>)
@@ -51,6 +51,11 @@
  * @xenova/transformers optionalDependency), opt-in PII masking
  * (AFTERGLOW_PII_REDACT) + encryption-at-rest (AFTERGLOW_ENCRYPTION_KEY) for
  * transcripts, and auto question-suggestion on `interview start`.
+ *
+ * v0.9 adds the file-based (async) interview path: `interview export-sheet`
+ * writes a fillable answer sheet to hand to the interviewee, and
+ * `interview import-answers` ingests the returned sheet — complementing the
+ * real-time (sync) `answer` flow. `mode=async` at start points at it.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -82,7 +87,7 @@ import { gcShape, runGc } from './tools/gc.js';
 import { registerPrompts } from './prompts.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.8.0';
+const SERVER_VERSION = '0.9.0';
 
 export function buildServer(): McpServer {
   const server = new McpServer(
