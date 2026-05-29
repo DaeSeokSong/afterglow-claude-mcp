@@ -54,6 +54,20 @@ export const BundleManifestSchema = z
     // for back-compat with pre-anchor bundles.
     bundleHash: z.string().optional(),
     agents: z.array(BundleAgentSchema).default([]),
+    // Phase P3 — Ed25519 signature of the bundleHash with the exporter's
+    // local keypair (TOFU: the public key travels in the bundle). Empty for
+    // pre-v0.10 bundles → import treats as 'unsigned' (not refused, but the
+    // verifier surfaces it). When present, verify-time tamper invalidates
+    // the signature so import can refuse or downgrade trust level.
+    signature: z
+      .object({
+        alg: z.literal('ed25519'),
+        publicKey: z.string(),  // base64
+        signature: z.string(),  // base64
+        signer: z.string().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type BundleManifest = z.infer<typeof BundleManifestSchema>;

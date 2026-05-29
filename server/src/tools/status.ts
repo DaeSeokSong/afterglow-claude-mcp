@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   assertInitialized,
+  readHistory,
   readInterviewIndex,
   readInterviewSession,
   readProvenance,
@@ -8,7 +9,7 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { sanitisePromptLine } from '../sanitize.js';
-import { ragMode } from '../rag.js';
+import { ragMode, denseHealth } from '../rag.js';
 import { encryptionEnabled, redactionEnabled } from '../privacy.js';
 import { whisperEngine } from '../whisper.js';
 import { safe, type ToolReply } from './types.js';
@@ -33,6 +34,10 @@ interface AgentSummary {
   originSigner?: string;
   trustLevel?: string;
   annotations: number;
+  /** ISO timestamp of the most recent history entry, or null if no activity. */
+  lastActivityAt: string | null;
+  /** Days since lastActivityAt (null when no activity). */
+  staleDays: number | null;
 }
 
 /**
@@ -62,6 +67,22 @@ export async function runStatus(args: StatusArgs): Promise<ToolReply> {
         if (sess) reviewPending += sess.attachments.filter((att) => att.reviewRequired).length;
       }
       const prov = await readProvenance(a.slug);
+      // Staleness — derive from the newest history entry. We read the last
+      // 1 row only (history is appended chronologically). Null when there's
+      // no activity yet (fresh draft) so the dashboard can show "—" not "∞".
+      let lastActivityAt: string | null = null;
+      let staleDays: number | null = null;
+      try {
+        const hist = await readHistory(a.slug);
+        if (hist.length > 0) {
+          const last = hist[hist.length - 1];
+          lastActivityAt = last.ts || null;
+          if (lastActivityAt) {
+            const ms = Date.now() - new Date(lastActivityAt).getTime();
+            if (!Number.isNaN(ms) && ms >= 0) staleDays = Math.floor(ms / 86_400_000);
+          }
+        }
+      } catch { /* archived agents may have no history accessible */ }
       summaries.push({
         slug: a.slug,
         name: a.name,
@@ -74,6 +95,8 @@ export async function runStatus(args: StatusArgs): Promise<ToolReply> {
         originSigner: prov?.origin.signer,
         trustLevel: prov?.trustLevel,
         annotations: prov?.postImportActivity.filter((p) => p.type === 'annotation').length ?? 0,
+        lastActivityAt,
+        staleDays,
       });
     }
 
@@ -90,11 +113,17 @@ export async function runStatus(args: StatusArgs): Promise<ToolReply> {
 
     // Process-level config (env-driven) — surfaced so an operator can confirm
     // at a glance which engine / privacy posture this server is running with.
+    // Also includes the dense RAG health counter (Phase 4 refinement): when
+    // the dense backend silently falls back to lexical, the failure count
+    // ticks up so operators don't keep running degraded retrieval.
+    const dh = denseHealth();
     const env = {
       ragMode: ragMode(),
       piiRedaction: redactionEnabled(),
       encryptionAtRest: encryptionEnabled(),
       whisperEngine: whisperEngine(),
+      denseFailures: dh.failures,
+      denseLastError: dh.lastError,
     };
 
     if (args.json) {
@@ -113,7 +142,8 @@ export async function runStatus(args: StatusArgs): Promise<ToolReply> {
     );
     lines.push(`인터뷰 ${totals.interviews} 회차 · pending-confirmation ${totals.pendingInterviews} · 검토대기 미디어 ${totals.reviewPending}`);
     lines.push(
-      `환경 · RAG ${env.ragMode} · PII마스킹 ${env.piiRedaction ? 'on' : 'off'} · 저장암호화 ${env.encryptionAtRest ? 'on' : 'off'} · whisper ${env.whisperEngine}`,
+      `환경 · RAG ${env.ragMode} · PII마스킹 ${env.piiRedaction ? 'on' : 'off'} · 저장암호화 ${env.encryptionAtRest ? 'on' : 'off'} · whisper ${env.whisperEngine}`
+      + (env.ragMode !== 'lexical' && env.denseFailures > 0 ? ` · ⚠ dense 실패 ${env.denseFailures}회 (${env.denseLastError ?? '?'})` : ''),
     );
     lines.push('');
     for (const s of summaries) {
@@ -129,6 +159,9 @@ export async function runStatus(args: StatusArgs): Promise<ToolReply> {
       if (s.imported) flags.push(`import←${sanitisePromptLine(s.originSigner ?? '?', 40)}/${s.trustLevel}`);
       if (s.annotations > 0) flags.push(`⚠주석 ${s.annotations}`);
       if (s.status === 'draft' || s.status === 'paused') flags.push('미서명');
+      // Staleness — 30d+ since last activity gets a 🕰 marker so it stands out
+      // (handoff sessions trailing for weeks usually need a nudge).
+      if (s.staleDays !== null && s.staleDays >= 30) flags.push(`🕰 ${s.staleDays}d`);
       lines.push(`  ${dot} ${s.slug.padEnd(16)} ${sanitisePromptLine(s.name, 20).padEnd(22)} ${flags.join(' · ') || '—'}`);
     }
     lines.push('');

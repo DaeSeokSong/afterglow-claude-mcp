@@ -16,6 +16,7 @@ import {
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
 import { elicitMissing, slugCandidates } from './elicit.js';
+import { assertAccessAllowed } from './acl.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
 export const gcShape = {
@@ -27,6 +28,7 @@ export const gcShape = {
   keep: z.number().int().min(0).max(1000).optional().describe('prune-versions 시 보존할 최신 스냅샷 수 (기본 10). 태그된 버전은 항상 보존.'),
   days: z.number().int().min(0).max(3650).optional().describe('purge-archive 시 N일 이상 지난 것만 (기본 0 = 전부).'),
   apply: z.boolean().optional().describe('실제 삭제 (기본 false = dry-run, 무엇이 지워질지 보고만).'),
+  caller: z.string().max(80).optional().describe('호출자 식별 (user:|role:|team:). apply=true + slug 지정 시 access policy gate.'),
 } as const;
 
 interface GcArgs {
@@ -35,6 +37,7 @@ interface GcArgs {
   keep?: number;
   days?: number;
   apply?: boolean;
+  caller?: string;
 }
 
 export async function runGc(args: GcArgs): Promise<ToolReply> {
@@ -47,6 +50,16 @@ export async function runGc(args: GcArgs): Promise<ToolReply> {
     ]);
     if (ask) return ask;
     const apply = !!args.apply;
+
+    // Per-tool ACL gate — applies when actually mutating (apply=true) AND a
+    // specific slug is targeted. Bulk passes over every agent (no slug) and
+    // dry-run previews bypass the gate; that matches the design intent — the
+    // gate is per-agent, and there's no agent-id to consult when slug is
+    // omitted. Document this in the limitations table.
+    if (apply && args.slug && args.action !== 'list') {
+      const denied = await assertAccessAllowed(args.slug, args.caller, 'gc');
+      if (denied) return denied;
+    }
 
     switch (args.action) {
       case 'list':

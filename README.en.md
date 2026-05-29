@@ -369,7 +369,7 @@ Afterglow/
 │  │  ├─ rag.ts            ← BM25 / dense / hybrid retrieval (knowledge/ + interview transcripts)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 22 tools: …18 above… + interview · export · import · verify
-│  └─ test/                ← 284 vitest + stdio handshake (covers all 24 tools)
+│  └─ test/                ← 296 vitest + stdio handshake (covers all 24 tools)
 │
 └─ docs/
    └─ design-source/       ← original claude.ai/design hand-off (JSX) — reference
@@ -422,7 +422,7 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 284 vitest tests
+npm test             # 296 vitest tests
 npm run test:stdio   # real MCP stdio handshake (all 24 tools + v0.3/v0.4 round-trips)
 npm run test:all     # unit → build → stdio
 ```
@@ -437,7 +437,7 @@ Afterglow v0.2.0 is a **proof of concept**. Things to know before pulling it int
 | **RAG indexing** | `.md` / `.txt` / `.csv` / `.jsonl` only — no PDF parsing | Convert PDFs to `.md` externally before dropping in |
 | **`audit.log` scale** | Every verify reads the whole file and re-hashes | At tens of thousands of rows, add chunked checkpoints |
 | **`.versions/` retention** | Every edit / sign / handoff / rollback is a permanent snapshot | Periodic manual pruning (`rm` + sync `tags.json`) |
-| **Mutator per-tool ACL** | `correct` · `edit` · `recalibrate apply` · `version` (rollback·tag·snapshot) all honour the agent's access policy via `caller`; remaining mutators (`handoff`·`interview`·`archive`·`gc`·`import`) still TBD | Extend the gate to the rest |
+| **Mutator per-tool ACL** | `correct` · `edit` · `recalibrate apply` · `version` (rollback·tag·snapshot) · `handoff` · `interview` (mutating actions) · `archive` (archive/restore) · `gc` (apply+slug) all honour the agent's access policy (v0.10). `import` is excluded — it creates new agents, so a per-agent policy has nothing to consult | Global import allowlist |
 | **GDPR delete** | `archive` only moves to `archive/<slug>/` — not real deletion | After retention window, manual `rm -rf` + registry edit |
 | **Multi-process** | In-process locks only — assumes one stdio server | Externalise to Redis/DB mutex for distributed runs |
 | **Side-log integrity** | Only `audit.log` is hash-chained — `history.log` / `consent.md` etc are plain text | Hash sibling files into audit `meta` for full coverage |
@@ -476,8 +476,13 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 - [x] **Close the audit loop / record-answer** — `correct --action record-answer` archives the answer Claude composed (question · answer · confidence · sources) into `answers.log`; `correct list` shows it alongside corrections. Previously `ask` only returned a context bundle and the actual answer never came back into Afterglow
 - [x] **Mutator per-tool ACL** — `correct` · `edit` · `recalibrate apply` · `version` (rollback·tag·snapshot) now honour the agent's access policy via a `caller` arg (required when policy is deny-default)
 - [x] **persona.bio truncation fix** — when bio overflows 20k, the *oldest* absorbed interview blocks are dropped first (previously the new block was silently discarded). `renderInterviewBlock` now also includes the `skipped` (N/A / meaningless) section so future asks know which areas the interviewee marked off-limits
+- [x] **Mutator ACL extended to all (v0.10)** — `handoff` · `interview` mutating actions · `archive` (archive/restore) · `gc` (apply + specific slug) now also honour `caller` + access policy. Read-only and model-management calls still pass
+- [x] **Ed25519 bundle-manifest signing (v0.10, P3 minimum)** — `export` signs the `bundleHash` with a local keypair and embeds the public key + signer name in the manifest (TOFU). `verify`/`import` check it — a tampered signature is refused at import (force with `acceptBrokenChain`). Pre-v0.10 unsigned bundles still go through as "unsigned" for back-compat
+- [x] **Data-subject export (v0.10, P4 minimum)** — `correct --action data-subject-export` returns a single JSON dump of persona · consent · interviews · history · corrections · recorded answers · provenance · audit counts. Read-only (passes even under deny policy)
+- [x] **Status refinements (v0.10)** — per-agent staleness (`lastActivityAt`/`staleDays`, 30 d+ flagged with 🕰) and dense RAG health counter (`denseFailures`/`denseLastError`)
+- [x] **HTML answer-sheet cross-device (v0.10)** — "Save progress (file)" / "Load progress" buttons let the interviewee carry an in-progress sheet across machines
 - [x] **Slash commands** `/mcp__afterglow__<name>` — 24 MCP prompts (one per tool) — type `afterglow:` → Tab to invoke
-- [x] 284 vitest + extended stdio handshake (covers all 24 tools + prompts)
+- [x] 296 vitest + extended stdio handshake (covers all 24 tools + prompts)
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 - [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
 

@@ -87,7 +87,7 @@ import { gcShape, runGc } from './tools/gc.js';
 import { registerPrompts } from './prompts.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.9.0';
+const SERVER_VERSION = '0.10.0';
 
 export function buildServer(): McpServer {
   const server = new McpServer(

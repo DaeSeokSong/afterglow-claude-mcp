@@ -13,7 +13,7 @@ import { ALWAYS_EXCLUDE, computeBundleHash, hashFolder, type BundleAgent, type B
 import { sanitisePromptLine } from '../sanitize.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
-const SERVER_VERSION = '0.9.0';
+const SERVER_VERSION = '0.10.0';
 
 export const exportShape = {
   slugs: z
@@ -147,6 +147,23 @@ export async function runExport(args: ExportArgs): Promise<ToolReply> {
       agents: manifestAgents,
     };
     manifest.bundleHash = computeBundleHash(manifest);
+    // Phase P3 — sign the bundleHash with the local Ed25519 keypair so
+    // receivers can verify the bundle hasn't been tampered with AND came from
+    // the same sender as past exports (TOFU: the public key travels with it).
+    try {
+      const { signPayload } = await import('../keys.js');
+      const signed = await signPayload(manifest.bundleHash, await (await import('../keys.js')).loadOrCreateKeyPair(args.exportedBy));
+      manifest.signature = {
+        alg: 'ed25519',
+        publicKey: signed.publicKey,
+        signature: signed.signature,
+        signer: signed.signer,
+      };
+    } catch {
+      // Signing failure must NOT block export — the bundle still has its
+      // anchor hash + per-agent folder hashes. The receiver will treat the
+      // bundle as "unsigned" and surface that.
+    }
     await fs.writeFile(join(outResolved, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
 
     await auditAppend({
@@ -173,6 +190,12 @@ export async function runExport(args: ExportArgs): Promise<ToolReply> {
     lines.push(`  번들 앵커 해시: ${manifest.bundleHash}`);
     lines.push('    ↳ 이 해시를 받는 사람에게 별도 채널(메신저·구두)로 전달하세요. 받는 사람이');
     lines.push('      /afterglow import … --expectAnchor <해시> 로 매니페스트 위변조를 검증합니다.');
+    if (manifest.signature) {
+      const { fingerprintPublicKey } = await import('../keys.js');
+      lines.push('');
+      lines.push(`  서명 (ed25519): ${sanitisePromptLine(manifest.signature.signer ?? '(이름 없음)', 80)} · 키 지문 ${fingerprintPublicKey(manifest.signature.publicKey)}`);
+      lines.push('    ↳ 받는 사람은 위 키 지문도 별도 채널로 한 번 확인해두면, 같은 발신자가 보낸 다음 번들과 비교할 수 있습니다 (TOFU 모델).');
+    }
     lines.push('');
     lines.push('  받는 사람은:');
     lines.push(`    (압축이면 먼저 풀고) /afterglow import <폴더경로> --expectAnchor ${manifest.bundleHash}`);

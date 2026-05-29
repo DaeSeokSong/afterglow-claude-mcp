@@ -413,7 +413,7 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (284 tests — +fix-review 3 +acl-record 8 +sheet 12, etc.)
+npm test                   # vitest (296 tests — +v10 12 +fix-review 3 +acl-record 8, etc.)
 npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (24 도구 모두 happy-path + v0.3 기능 라운드트립)
 npm run test:all           # 전체 (unit → build → stdio)
 ```
@@ -521,7 +521,7 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 - [x] **인자 자동 안내(elicitation)** — 필수 인자 누락 시 번호 선택지 + `[필수]`/`[선택]` 표기로 안내 (필수 인자 있는 도구 전체). 스키마는 optional + handler 에서 검증/안내
 - [x] **인터뷰 진행 방식 선택** — 실시간(`mode=sync`·`answer`) / 파일 기반(`mode=async` → `export-sheet`(기본 HTML 폼 · 체크박스 · localStorage 자동저장 / `--format md` 옵션) → 채움 → `import-answers` JSON·MD 자동 감지)
 - [x] **MCP prompts → 슬래시 명령** `/mcp__afterglow__<이름>` (24종 — 도구 전부 1:1, `afterglow:` 입력→Tab, 인자 자동완성)
-- [x] vitest 284개 + 24 도구 stdio 핸드셰이크 (prompts 포함)
+- [x] vitest 296개 + 24 도구 stdio 핸드셰이크 (prompts 포함)
 - [ ] per-tool ACL · Web companion · 정기 retention 자동화
 - [ ] knowledge 파일까지 확장한 일괄 암호화/복호화 도구 · 외부 STT(Tier 2) 어댑터
 

@@ -22,9 +22,9 @@ const RECORD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$/;
 
 export const correctShape = {
   action: z
-    .enum(['feedback', 'edit-answer', 'save-rule', 'record-answer', 'list'])
+    .enum(['feedback', 'edit-answer', 'save-rule', 'record-answer', 'list', 'data-subject-export'])
     .optional()
-    .describe('(필수) feedback | edit-answer | save-rule | record-answer(Claude 가 만든 답변을 감사용으로 회수 저장) | list.'),
+    .describe('(필수) feedback | edit-answer | save-rule | record-answer(Claude 가 만든 답변을 감사용으로 회수 저장) | list | data-subject-export(데이터 주체용 종합 덤프, 읽기전용).'),
   slug: z.string().min(1).optional().describe('(필수) 대상 에이전트 slug. 생략 시 안내합니다.'),
   recordId: z
     .string()
@@ -82,7 +82,7 @@ export const correctShape = {
 } as const;
 
 interface CorrectArgs {
-  action: 'feedback' | 'edit-answer' | 'save-rule' | 'record-answer' | 'list';
+  action: 'feedback' | 'edit-answer' | 'save-rule' | 'record-answer' | 'list' | 'data-subject-export';
   slug: string;
   recordId?: string;
   feedback?: string;
@@ -112,10 +112,10 @@ export async function runCorrect(args: CorrectArgs): Promise<ToolReply> {
     } catch (e) {
       return errorReply((e as Error).message);
     }
-    // list is the only read-only action; all others append to corrections.log
-    // (or answers.log for record-answer) and would corrupt an archived agent's
-    // record.
-    if (args.action !== 'list') {
+    // list + data-subject-export are read-only; all others append to
+    // corrections.log (or answers.log for record-answer) and would corrupt
+    // an archived agent's record.
+    if (args.action !== 'list' && args.action !== 'data-subject-export') {
       try {
         await assertWritable(args.slug);
       } catch (e) {
@@ -144,8 +144,79 @@ export async function runCorrect(args: CorrectArgs): Promise<ToolReply> {
         return recordAnswer(args);
       case 'list':
         return listAction(args.slug, args.limit ?? 30);
+      case 'data-subject-export':
+        return dataSubjectExport(args.slug);
     }
   });
+}
+
+/**
+ * Data-subject export (Phase P4 minimum) — read-only dump of everything this
+ * agent's record holds: persona, consent.md, history (tail), corrections,
+ * recorded answers, interview index, provenance, followup consent, and an
+ * audit-count summary. Lets the data subject (the represented person) review
+ * what is held about them in their absence. Returns the payload INLINE in the
+ * tool reply so it's copy/save-friendly; no separate file is written.
+ *
+ * Out of scope: cryptographic identity binding (requires signed challenge —
+ * future), erasure ("right to be forgotten" — gc purge-archive covers the
+ * folder, but the audit-log chain is intentionally tamper-evident so
+ * selective deletion needs its own design).
+ */
+async function dataSubjectExport(slug: string): Promise<ToolReply> {
+  const { readPersona, readConsentSigners, readProvenance, readFollowupConsent, readInterviewIndex, readHistory } = await import('../storage.js');
+  const { auditPath } = await import('../audit.js');
+  const persona = await readPersona(slug).catch(() => null);
+  const signers = await readConsentSigners(slug).catch(() => []);
+  const provenance = await readProvenance(slug).catch(() => null);
+  const followup = await readFollowupConsent(slug).catch(() => null);
+  const interviews = await readInterviewIndex(slug).catch(() => ({ version: 1 as const, sessions: [] }));
+  const history = await readHistory(slug).catch(() => []);
+  const corrections = await readCorrections(slug).catch(() => []);
+  const answers = await readAnswerLog(slug).catch(() => []);
+  // Audit: count entries about this slug rather than dumping the whole chain
+  // (the chain is global, not per-agent). Cheap counts only.
+  let auditCount = 0;
+  try {
+    const { promises: fsp } = await import('node:fs');
+    const raw = await fsp.readFile(auditPath(), 'utf8');
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const j = JSON.parse(line) as { slug?: string };
+        if (j.slug === slug) auditCount++;
+      } catch { /* skip */ }
+    }
+  } catch { /* no audit log yet */ }
+
+  const dump = {
+    afterglowDataSubjectExport: 1,
+    slug,
+    exportedAt: new Date().toISOString(),
+    persona,
+    consent: { signers },
+    provenance,
+    followupConsent: followup,
+    interviews: { count: interviews.sessions.length, sessions: interviews.sessions },
+    history: { count: history.length, tail: history.slice(-200) },
+    corrections: { count: corrections.length, entries: corrections },
+    recordedAnswers: { count: answers.length, entries: answers },
+    audit: { aboutThisAgent: auditCount },
+    notes: [
+      '이 문서는 이 에이전트(슬러그=' + slug + ') 에 대해 Afterglow 가 보유한 모든 데이터의 종합 덤프입니다 (P4 — 데이터 주체 권리).',
+      'audit 체인은 전역 hash-chained 로그라 발췌 삭제가 무결성을 깨뜨립니다 — 여기서는 건수만 표시합니다.',
+      '본인이 데이터 삭제를 원하면 운영자가 /afterglow archive → /afterglow gc purge-archive 를 진행합니다.',
+      'PoC 전제: 데이터 주체 신원 증명은 이 도구에 내장돼 있지 않습니다 (운영 환경에선 SSO 통합 필요).',
+    ],
+  };
+
+  await auditAppend({
+    tool: 'afterglow_correct',
+    slug,
+    summary: `data-subject-export · ${slug}`,
+    meta: { action: 'data-subject-export', historyCount: history.length, correctionsCount: corrections.length, answersCount: answers.length, interviewsCount: interviews.sessions.length },
+  });
+  return { content: [{ type: 'text', text: JSON.stringify(dump, null, 2) }] };
 }
 
 /**

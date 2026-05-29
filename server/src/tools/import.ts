@@ -108,6 +108,7 @@ export async function runImport(args: ImportArgs): Promise<ToolReply> {
     let bundleIncludedVersions = false;
     let isBundle = false;
     let computedAnchor: string | undefined;
+    let signatureNote: string | undefined;
     if (await isBundleDir(inputDir)) {
       isBundle = true;
       const manifest = await readManifest(inputDir);
@@ -119,6 +120,26 @@ export async function runImport(args: ImportArgs): Promise<ToolReply> {
         return errorReply(
           `번들 앵커 불일치 — 매니페스트 위변조 의심.\n  기대: ${sanitisePromptLine(args.expectAnchor, 120)}\n  실제: ${computedAnchor}\n전체 import 를 거부합니다.`,
         );
+      }
+      // Phase P3 — signature verification (TOFU). If present and valid →
+      // surface signer + key fingerprint. If present and invalid → refuse
+      // (unless acceptBrokenChain). If absent → quietly accept as unsigned
+      // for back-compat.
+      if (manifest.signature && manifest.bundleHash) {
+        const { verifyPayload, fingerprintPublicKey } = await import('../keys.js');
+        const ok = verifyPayload(manifest.bundleHash, manifest.signature.publicKey, manifest.signature.signature);
+        const who = sanitisePromptLine(manifest.signature.signer ?? '(이름 없음)', 80);
+        const fp = fingerprintPublicKey(manifest.signature.publicKey);
+        if (!ok && !args.acceptBrokenChain) {
+          return errorReply(
+            `번들 서명 검증 실패 (signer="${who}", 키 지문 ${fp}) — manifest 가 서명 이후 변조됐을 가능성. 강행하려면 --acceptBrokenChain.`,
+          );
+        }
+        signatureNote = ok
+          ? `서명 검증 ✓ — signer="${who}" · 키 지문 ${fp}`
+          : `서명 검증 ✗ — 강행됨 (acceptBrokenChain). signer="${who}" · 키 지문 ${fp}`;
+      } else {
+        signatureNote = '서명 없음 (사전-v0.10 또는 비서명 번들)';
       }
       for (const a of manifest.agents) {
         sources.push({
@@ -149,7 +170,7 @@ export async function runImport(args: ImportArgs): Promise<ToolReply> {
       results.push(await importOne(src, exclude, args, isBundle));
     }
 
-    return { content: [{ type: 'text', text: renderReport(results, args, inputDir, computedAnchor) }] };
+    return { content: [{ type: 'text', text: renderReport(results, args, inputDir, computedAnchor, signatureNote) }] };
   });
 }
 
@@ -343,13 +364,14 @@ async function appendProvenanceCustody(
   await writeProvenance(targetSlug, prov);
 }
 
-function renderReport(results: ImportResult[], args: ImportArgs, inputDir: string, computedAnchor?: string): string {
+function renderReport(results: ImportResult[], args: ImportArgs, inputDir: string, computedAnchor?: string, signatureNote?: string): string {
   const lines: string[] = [];
   const verb = args.dryRun ? '검증(dry-run)' : 'import';
   lines.push(`# afterglow ${verb} · ${inputDir}`);
   if (computedAnchor) {
     lines.push(`번들 앵커: ${computedAnchor}${args.expectAnchor ? ' ✓ 일치' : ' (--expectAnchor 미지정 — 보낸 사람과 대조 권장)'}`);
   }
+  if (signatureNote) lines.push(signatureNote);
   lines.push('');
   for (const r of results) {
     const v = r.validation;
