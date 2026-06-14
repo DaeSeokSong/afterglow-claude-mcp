@@ -419,8 +419,22 @@ export const GROUNDING_STRONG_FLOOR = 0.67;
  *
  * Pure + deterministic so the framing and tests can prove it precisely.
  */
+// Question-framing tokens that are never the *content* an answer must be
+// grounded in — interrogatives + polite request verbs. Dropping them from the
+// coverage calc keeps the verdict honest: "온보딩 이탈 어떻게 줄였어요?"
+// should be judged on 온보딩/이탈, not penalised for 어떻게/줄였어요. Kept
+// deliberately tight (only unambiguous framing words) so we don't accidentally
+// drop a real topic term and over-claim grounding. Query-side only — BM25
+// retrieval/ranking is untouched.
+const QUERY_FILLER = new Set([
+  '어떻게', '무엇', '뭐', '뭔', '뭔지', '어디', '언제', '누구', '누가', '얼마', '얼마나',
+  '어떤', '어느', '알려줘', '알려주세요', '알려', '말해줘', '말해주세요', '설명해줘',
+  '해줘', '해주세요', '궁금', '궁금해', '부탁', '줄였어요', '인가요', '인지',
+  'what', 'how', 'why', 'where', 'when', 'who', 'whom', 'which', 'tell', 'please', 'explain', 'about',
+]);
+
 export function assessGrounding(query: string, sourceTexts: string[]): GroundingAssessment {
-  const q = [...new Set(tokenize(query))];
+  const q = [...new Set(tokenize(query))].filter((t) => !QUERY_FILLER.has(t));
   if (q.length === 0) {
     return { verdict: 'none', coverage: 0, confidence: 0, matched: [], missing: [], queryTerms: 0 };
   }
