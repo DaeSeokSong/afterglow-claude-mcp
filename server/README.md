@@ -75,7 +75,11 @@ claude /afterglow ask    jiyoon "..."
 ask → MCP reads persona.json + system-prompt.md + RAG over knowledge/  →  returns context bundle  →  Claude writes the answer (✦ + confidence + sources)
 ```
 
-RAG ranks with **BM25** by default (offline, zero-dependency), with an opt-in **dense-vector** backend and **hybrid RRF** fusion (see env vars).
+RAG ranks with **BM25** by default (offline, zero-dependency, Korean particle-stripped so `정책` matches `정책은`), with an opt-in **dense-vector** backend and **hybrid RRF** fusion (see env vars).
+
+### 🛑 Grounding — no made-up answers (always on)
+
+Every `ask`/`council` bundle leads with a hard **grounding contract**: the persona may only state facts that trace to a cited source ([소개] persona bio / [n] retrieved chunk / [보정] correction), and any claim it can't cite is forbidden. A backend-independent gate measures how much of the *question's* vocabulary actually appears in the provided sources and stamps a verdict — **근거 없음 / 매우 부족 / 부분 / 충분** — with the missing key terms named. On `none`/`weak` the only sanctioned reply is "that isn't in the provided materials." Confidence is derived from that coverage (replacing an old heuristic that reported ~100% for any match), so a thin or off-topic match no longer looks certain. The contract is restated at the end of the bundle (recency) and adversarial text inside a chunk or the question is fenced as data, so it can't override the rules.
 
 ## 🛠 The 26 tools
 
@@ -135,8 +139,8 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (306 tests)
-npm run test:stdio         # real MCP stdio handshake (all 26 tools, happy-path + feature round-trips)
+npm test                   # vitest (323 tests)
+npm run test:stdio         # real MCP stdio handshake (all 26 tools, happy-path + grounding + feature round-trips)
 npm run test:all           # typecheck → build → unit → stdio
 ```
 

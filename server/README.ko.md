@@ -96,7 +96,7 @@ sequenceDiagram
     U->>CC: claude /afterglow ask jiyoon "..."
     CC->>MCP: tools/call afterglow_ask
     MCP->>FS: persona.json + system-prompt.md
-    MCP->>FS: knowledge/ retrieval (TF-IDF RAG)
+    MCP->>FS: knowledge/ retrieval (BM25 RAG + 근거 게이트)
     MCP-->>CC: 페르소나 + 검색된 청크
     Note over CC: Claude 가 자기 세션으로 답변 생성<br/>(별도 모델 호출 없음)
     CC-->>U: ✦ 답변 + 신뢰도 + 출처
@@ -182,7 +182,7 @@ sequenceDiagram
     <tr>
       <td><code>afterglow_ask</code></td>
       <td><code>/afterglow ask &lt;slug&gt; "..."</code></td>
-      <td>페르소나 system prompt + TF-IDF RAG 검색 결과를 묶어 반환. <b>Claude가 그 컨텍스트로 직접 답변.</b> active 에이전트만 허용.</td>
+      <td>페르소나 system prompt + BM25 RAG 검색 + <b>근거 게이트(없는 정보 거절)</b> 를 묶어 반환. <b>Claude가 그 컨텍스트로 직접 답변.</b> active 에이전트만 허용.</td>
     </tr>
     <tr>
       <td><code>afterglow_edit</code></td>
@@ -396,7 +396,7 @@ import 가 자동으로 확인하는 것:
    │     ├─ session.json     ← 질문·답변·서명
    │     └─ attachments/     ← 음성·영상 원본 + <파일>.transcript.md (전사본만 RAG 인덱싱)
    ├─ knowledge/             ← 원본 자료 (.md · .txt · .csv · .jsonl 만 인덱싱. PDF는 별도 변환 필요)
-   └─ embeddings/            ← RAG 인덱스 (PoC: TF-IDF, 추후 dense vector)
+   └─ embeddings/            ← RAG 인덱스 (BM25 기본, dense vector 옵트인)
 ```
 
 이게 전부입니다. 백업·이동·삭제·인계 = 폴더 통째로 처리.
@@ -423,7 +423,7 @@ git clone https://github.com/DaeSeokSong/Afterglow.git
 cd Afterglow/server
 npm install
 npm run build              # tsc → dist/
-npm test                   # vitest (306 tests — +usability 10 +v10 12 +acl-record 8, etc.)
+npm test                   # vitest (323 tests — +usability 10 +v10 12 +acl-record 8, etc.)
 npm run test:stdio         # 실제 MCP stdio 핸드셰이크 (26 도구 모두 happy-path + v0.3 기능 라운드트립)
 npm run test:all           # 전체 (unit → build → stdio)
 ```
@@ -438,7 +438,7 @@ server/
 │  ├─ persona.ts        ← zod schema + 시스템 프롬프트 렌더링
 │  ├─ interview.ts      ← 인터뷰/첨부/서명/provenance zod schema + bio 블록 렌더링
 │  ├─ portable.ts       ← 번들 manifest + 폴더 해시 + 인젝션 스캔 + 검증/복사
-│  ├─ rag.ts            ← TF-IDF chunk retrieval (knowledge/ + interviews/ 전사본)
+│  ├─ rag.ts            ← BM25 chunk retrieval + 근거 게이트 (knowledge/ + interviews/ 전사본)
 │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  └─ tools/
 │     ├─ init.ts
@@ -511,8 +511,9 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 
 - [x] 26 도구 전부 출시: **guide · learn** + …22개… · interview · export · import · verify · status · gc
 - [x] **사용성(v0.11)** — `guide`(상태별 시작 안내) · `learn`(자료 추가, 숨은 폴더 불필요) · `create --signer`(자동 init+활성화 → 핵심 3단계 create→learn→ask)
+- [x] **근거 기반/할루시네이션 방지(v0.12)** — ask/council 에 grounding contract + 충족도 게이트(없음/매우부족/부분/충분) · 신뢰도 버그 수정 · 한국어 조사 제거 검색 · 다각도 QA 증명
 - [x] zod 스키마 + 시스템 프롬프트 자동 렌더링
-- [x] TF-IDF RAG (오프라인 · 외부 의존성 0) — `knowledge/` + 인터뷰 전사본
+- [x] 렉시컬 RAG — BM25 (오프라인 · 외부 의존성 0) — `knowledge/` + 인터뷰 전사본
 - [x] SHA-256 hash-chained 감사 로그 + 무결성 검증
 - [x] consent.md 서명 워크플로우 (draft → active 게이트)
 - [x] 신뢰도 보정: 전역 + **expertise-aware by-topic** 진단
@@ -532,7 +533,7 @@ export async function retrieve(slug: string, query: string, topK = 4): Promise<R
 - [x] **인자 자동 안내(elicitation)** — 필수 인자 누락 시 번호 선택지 + `[필수]`/`[선택]` 표기로 안내 (필수 인자 있는 도구 전체). 스키마는 optional + handler 에서 검증/안내
 - [x] **인터뷰 진행 방식 선택** — 실시간(`mode=sync`·`answer`) / 파일 기반(`mode=async` → `export-sheet`(기본 HTML 폼 · 체크박스 · localStorage 자동저장 / `--format md` 옵션) → 채움 → `import-answers` JSON·MD 자동 감지)
 - [x] **MCP prompts → 슬래시 명령** `/mcp__afterglow__<이름>` (26종 — 도구 전부 1:1, `afterglow:` 입력→Tab, 인자 자동완성)
-- [x] vitest 306개 + 26 도구 stdio 핸드셰이크 (prompts 포함)
+- [x] vitest 323개 + 26 도구 stdio 핸드셰이크 (prompts 포함)
 - [ ] per-tool ACL · Web companion · 정기 retention 자동화
 - [ ] knowledge 파일까지 확장한 일괄 암호화/복호화 도구 · 외부 STT(Tier 2) 어댑터
 

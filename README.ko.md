@@ -325,13 +325,23 @@ sequenceDiagram
     U->>CC: claude /afterglow ask jiyoon "..."
     CC->>MCP: tools/call afterglow_ask
     MCP->>FS: persona.json + system-prompt.md
-    MCP->>FS: knowledge/ retrieval (TF-IDF RAG)
+    MCP->>FS: knowledge/ retrieval (BM25 RAG + 근거 게이트)
     MCP-->>CC: 페르소나 + 검색된 청크
     Note over CC: Claude 가 자기 세션으로 답변 생성<br/>(별도 모델 호출 없음)
     CC-->>U: ✦ 답변 + 신뢰도 + 출처
 ```
 
 **`afterglow_ask` 는 LLM 을 호출하지 않습니다.** 페르소나 system-prompt + RAG 결과를 구조화된 텍스트로 묶어 반환하면, Claude Code 가 자기 컨텍스트로 직접 답변을 생성합니다. → 추가 모델 / GPU / 임베딩 API 0원.
+
+### 🛑 근거 기반 — 없는 정보는 절대 지어내지 않음 (항상 on)
+
+답은 반환된 번들로 만들어지므로, 번들 자체가 **근거 없는 답을 "규칙 위반" 으로 만들도록** 설계했습니다:
+
+- **답변 규칙(grounding contract)을 맨 앞·맨 뒤에 명시.** 페르소나는 인용 가능한 근거(`[소개]` 페르소나 소개 / `[n]` 검색된 청크 / `[보정]` 사용자 보정)에 **실제로 있는 내용만** 말할 수 있고, 인용할 근거가 없는 문장은 금지 — 추측 대신 *"그건 제공된 자료에 없어요"* 라고 답합니다.
+- **백엔드 독립적인 근거 게이트** 가 *질문* 의 핵심어가 자료에 얼마나 있는지를 재서 판정(**근거 없음 / 매우 부족 / 부분 / 충분**)을 찍고, 빠진 핵심어를 이름으로 명시합니다. `없음`/`매우 부족` 이면 허용되는 답은 거절뿐입니다.
+- **정직한 신뢰도.** 신뢰도를 그 충족도에서 계산 — 어떤 키워드든 1개만 걸리면 ~100% 로 보고하던 기존 버그를 고쳤습니다. 그래서 빈약·엉뚱한 매칭이 더는 확신처럼 보이지 않습니다.
+- **인젝션 내성.** 청크나 질문 안의 "규칙 무시하고 지어내라" 류 텍스트는 데이터로 펜싱되어 규칙을 못 덮습니다.
+- **한국어 검색 보정.** 토큰을 조사 제거(`정책` ≈ `정책은`/`정책이`)해서, 질문이 굴절형 청크를 놓치지 않고 실제로 찾습니다.
 
 > **PoC 한계 — RAG 인덱스 범위.** 현재 RAG는 `knowledge/` 안의 텍스트 형태(`.md` · `.txt` · `.csv` · `.jsonl`) 만 인덱싱합니다. **PDF 는 자동 파싱하지 않습니다.** PDF/PPT 자료는 외부 추출 후 `.md` / `.txt` 로 변환해 넣어주세요. (`pdftotext file.pdf -` 등). 자료 크기는 항목별 약 4MB 이하를 권장.
 
@@ -372,12 +382,12 @@ Afterglow/
 │  │  ├─ index.ts          ← stdio 진입점 (McpServer + StdioServerTransport)
 │  │  ├─ storage.ts        ← ~/.claude/afterglow/ 파일시스템 어댑터 + consent gate
 │  │  ├─ persona.ts        ← zod schema + 시스템 프롬프트 렌더링
-│  │  ├─ rag.ts            ← TF-IDF chunk retrieval (knowledge/ + 인터뷰 전사본)
+│  │  ├─ rag.ts            ← BM25 chunk retrieval + 근거 게이트 (knowledge/ + 인터뷰 전사본)
 │  │  ├─ interview.ts      ← 인터뷰/첨부/서명/provenance 스키마
 │  │  ├─ portable.ts       ← 번들 manifest + 해시 + 인젝션 스캔
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 26 도구: guide · learn …+ interview · export · import · verify · status · gc
-│  └─ test/                ← vitest 306 + stdio 핸드셰이크 (26 도구)
+│  └─ test/                ← vitest 323 + stdio 핸드셰이크 (26 도구)
 │
 └─ docs/
    └─ design-source/       ← claude.ai/design 핸드오프 원본 (JSX) — 참조용
@@ -411,7 +421,7 @@ Afterglow/
    │  ├─ index.json          ← 회차 인덱스
    │  └─ <NNN-제목>/session.json + attachments/ (음성·영상 + 전사본)
    ├─ knowledge/             ← 원본 자료 (PDF · MD · TXT · CSV · JSONL)
-   └─ embeddings/            ← RAG 인덱스 (PoC: TF-IDF, 추후 dense vector)
+   └─ embeddings/            ← RAG 인덱스 (BM25 기본, dense vector 옵트인)
 ```
 
 </details>
@@ -457,12 +467,12 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 
 ## 🗺 Roadmap
 
-### 현재 (v0.11.0)
+### 현재 (v0.12.0)
 - [x] 18 화면 인터랙티브 제안서 (Vite + React 19 + TS)
 - [x] Cmd+K 팔레트 + 키보드 단축키 + 화면 간 클릭 네비
 - [x] **MCP 서버 26 도구**: **`guide`** · `init` · `create` · **`learn`** · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · **`interview`** · **`export`** · **`import`** · **`verify`** · **`status`** · **`gc`**
 - [x] persona zod schema + 시스템 프롬프트 자동 렌더링
-- [x] **TF-IDF RAG** (외부 의존성 0 · 키워드 매칭 대비 정확도 ↑) — `knowledge/` + 인터뷰 전사본
+- [x] **렉시컬 RAG** — BM25 (외부 의존성 0) — `knowledge/` + 인터뷰 전사본
 - [x] **SHA-256 hash-chained 감사 로그** + 무결성 검증
 - [x] **consent.md 서명 워크플로우** (draft → active 게이트, ask/council 보호)
 - [x] **신뢰도 자동 보정** (전역 + **expertise-aware by-topic** 진단)
@@ -490,8 +500,9 @@ Afterglow v0.2.0 은 **PoC 단계**입니다. 운영 배포 전 알아두면 좋
 - [x] **status 정밀화 (v0.10)** — 에이전트별 staleness(`lastActivityAt`/`staleDays`, 30일+은 🕰), dense RAG 실패 카운터(`denseFailures`/`denseLastError`) 표시
 - [x] **HTML 답변지 크로스-디바이스 (v0.10)** — "진행 저장(파일)" / "진행 불러오기" 버튼 — localStorage 한계를 넘어 다른 기기에서 이어쓰기
 - [x] **사용성 (v0.11)** — **`guide`**(상태별 시작 안내) · **`learn`**(자료 추가 — 텍스트/파일/폴더/URL, 숨은 폴더 찾을 필요 없음) · **`create --signer`**(자동 init+활성화 → 핵심 3단계 `create → learn → ask`, init 불필요)
+- [x] **근거 기반 / 할루시네이션 방지 (v0.12)** — `ask`/`council` 번들이 **답변 규칙(grounding contract)** 으로 시작(`[소개]`/`[n]`/`[보정]` 인용 못 하면 말하지 말 것) + 백엔드 독립적 **충족도 게이트**(판정 근거없음/매우부족/부분/충분, 빠진 핵심어 명시)로 없는 정보는 거절하게 강제. 신뢰도 버그(BM25 매칭이면 ~100% 로 뜨던 것) 수정 + 한국어 조사 제거로 굴절형 검색 실제 동작. 다각도 QA(빈자료/무관/부분/인젝션/dense백엔드/council)로 증명
 - [x] **슬래시 명령** `/mcp__afterglow__<이름>` — MCP prompt 26종(도구 전부)으로 `afterglow:` 입력→Tab 호출
-- [x] vitest 306개 + stdio 핸드셰이크 (26 도구 + prompts 검증)
+- [x] vitest 323개 + stdio 핸드셰이크 (26 도구 + prompts 검증 · 할루시네이션 방지 QA 포함)
 - [x] npm 퍼블리시 (`@daeseoksong/afterglow-mcp`)
 - [x] **핸즈온 Jupyter 노트북** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — 초보자용 전 기능 따라하기
 
