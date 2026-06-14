@@ -25,6 +25,13 @@ function kv(pairs: Record<string, string | undefined>): string {
 }
 
 export function registerPrompts(server: McpServer): void {
+  /* ---- getting started ---- */
+  server.registerPrompt(
+    'guide',
+    { title: 'Afterglow: 빠른 시작', description: '뭘 하면 되는지 안내 (afterglow_guide)', argsSchema: { slug: z.string().optional().describe('특정 에이전트 맞춤 안내 (선택)') } },
+    async ({ slug }) => ask(`Afterglow \`afterglow_guide\` 도구를 호출해줘${slug ? `: ${kv({ slug })}` : '.'}`),
+  );
+
   /* ---- setup / lifecycle ---- */
   server.registerPrompt(
     'init',
@@ -36,17 +43,18 @@ export function registerPrompts(server: McpServer): void {
     'create',
     {
       title: 'Afterglow: 에이전트 생성',
-      description: '퇴사자 에이전트 폴더 생성 (afterglow_create)',
+      description: '퇴사자 에이전트 폴더 생성 (afterglow_create) — signer 주면 바로 active',
       argsSchema: {
         slug: z.string().describe('짧은 식별자 (소문자/숫자/하이픈). 예: jiyoon'),
         name: z.string().describe('실제 이름. 예: 이지윤'),
         role: z.string().describe('직무 / 부서'),
+        signer: z.string().optional().describe('주면 만들면서 바로 서명·활성화 (선택)'),
         tenure: z.string().optional().describe('재직 기간 (선택)'),
         bio: z.string().optional().describe('한 줄 소개 (선택)'),
       },
     },
-    async ({ slug, name, role, tenure, bio }) =>
-      ask(`Afterglow \`afterglow_create\` 도구를 호출해줘: ${kv({ slug, name, role, tenure, bio })}`),
+    async ({ slug, name, role, signer, tenure, bio }) =>
+      ask(`Afterglow \`afterglow_create\` 도구를 호출해줘: ${kv({ slug, name, role, signer, tenure, bio })}`),
   );
 
   server.registerPrompt(
@@ -104,6 +112,23 @@ export function registerPrompts(server: McpServer): void {
       argsSchema: { slug: z.string().describe('대상 slug'), question: z.string().describe('질문') },
     },
     async ({ slug, question }) => ask(`Afterglow \`afterglow_ask\` 도구를 호출해줘: ${kv({ slug, question })}`),
+  );
+
+  server.registerPrompt(
+    'learn',
+    {
+      title: 'Afterglow: 지식 학습',
+      description: 'knowledge/ 에 자료 추가 — ask 가 검색할 내용 (afterglow_learn)',
+      argsSchema: {
+        slug: z.string().describe('대상 slug'),
+        path: z.string().optional().describe('cwd 하위 파일/폴더 (선택)'),
+        text: z.string().optional().describe('붙여넣을 지식 본문 (선택)'),
+        url: z.string().optional().describe('가져올 URL (선택)'),
+        title: z.string().optional().describe('text/url 저장 제목 (선택)'),
+      },
+    },
+    async ({ slug, path, text, url, title }) =>
+      ask(`Afterglow \`afterglow_learn\` 도구를 호출해줘: ${kv({ slug, path, text, url, title })}`),
   );
 
   server.registerPrompt(

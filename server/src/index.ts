@@ -7,9 +7,11 @@
  *
  *   claude mcp add afterglow npx @daeseoksong/afterglow-mcp
  *
- * The server exposes 24 tools that mirror the slash commands in the design:
+ * The server exposes 26 tools that mirror the slash commands in the design:
+ *   - afterglow_guide            (/afterglow guide)  — getting-started orientation
  *   - afterglow_init             (/afterglow init)
- *   - afterglow_create           (/afterglow create <slug> …)
+ *   - afterglow_create           (/afterglow create <slug> … [--signer])  — auto-inits; --signer activates
+ *   - afterglow_learn            (/afterglow learn <slug> --path|--text|--url)  — add knowledge for ask
  *   - afterglow_list             (/afterglow list)
  *   - afterglow_inspect          (/afterglow inspect <slug>)
  *   - afterglow_ask              (/afterglow ask <slug> "...")
@@ -84,10 +86,12 @@ import { importShape, runImport } from './tools/import.js';
 import { verifyShape, runVerify } from './tools/verify.js';
 import { statusShape, runStatus } from './tools/status.js';
 import { gcShape, runGc } from './tools/gc.js';
+import { learnShape, runLearn } from './tools/learn.js';
+import { guideShape, runGuide } from './tools/guide.js';
 import { registerPrompts } from './prompts.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.10.0';
+const SERVER_VERSION = '0.11.0';
 
 export function buildServer(): McpServer {
   const server = new McpServer(
@@ -369,6 +373,28 @@ export function buildServer(): McpServer {
       inputSchema: gcShape,
     },
     wrap(runGc),
+  );
+
+  server.registerTool(
+    'afterglow_learn',
+    {
+      title: 'Afterglow — 지식 학습 (자료 추가)',
+      description:
+        '에이전트의 knowledge/ 에 자료를 추가합니다 — ask 가 검색할 내용. --path(cwd 하위 파일/폴더), --text(붙여넣기), --url(가져오기) 중 하나. .md/.txt/.json/.jsonl/.csv 만 색인됩니다. 폴더를 숨겨놓고 직접 복사할 필요 없이 이 도구로 바로 학습시키세요.',
+      inputSchema: learnShape,
+    },
+    wrap(runLearn),
+  );
+
+  server.registerTool(
+    'afterglow_guide',
+    {
+      title: 'Afterglow — 빠른 시작 안내',
+      description:
+        '"방금 깔았는데 뭘 하면 되지?" 에 답하는 오리엔테이션. 현재 상태(미초기화 / 첫 에이전트 / 보유)에 맞춰 create → learn → sign → ask 핵심 4단계와 복붙 예시를 보여줍니다. 인자 없이 호출하세요.',
+      inputSchema: guideShape,
+    },
+    wrap(runGuide),
   );
 
   // Slash commands: /mcp__afterglow__<name> in Claude Code's prompt box.

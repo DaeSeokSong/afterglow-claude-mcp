@@ -3,10 +3,12 @@ import {
   agentDir,
   agentExists,
   appendHistory,
-  assertInitialized,
   assertValidSlug,
   AgentExistsError,
   createAgentSkeleton,
+  init,
+  isInitialized,
+  signConsent,
   upsertRegistryEntry,
   writePersona,
   writeSystemPrompt,
@@ -20,6 +22,7 @@ import {
   renderSystemPrompt,
 } from '../persona.js';
 import { append as auditAppend } from '../audit.js';
+import { sanitisePromptLine } from '../sanitize.js';
 import { elicitMissing } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
 
@@ -50,6 +53,11 @@ export const createShape = {
     .optional()
     .describe('이 에이전트가 호출할 수 있는 MCP. 기본 [filesystem].'),
   mcpDeny: z.array(z.string().max(200)).max(50).optional().describe('명시적으로 거부할 MCP.'),
+  signer: z
+    .string()
+    .max(200)
+    .optional()
+    .describe('주면 만들면서 바로 동의 서명 → active (create + sign 한 번에). 보통 본인 이름. 생략 시 draft 로 남고 ask 전에 별도 sign 필요.'),
 } as const;
 
 export interface CreateArgs {
@@ -62,15 +70,20 @@ export interface CreateArgs {
   sources?: string[];
   mcpAllow?: string[];
   mcpDeny?: string[];
+  signer?: string;
 }
 
 export async function runCreate(args: CreateArgs): Promise<ToolReply> {
   return safe(async () => {
-  await assertInitialized();
+  // Auto-init: a new user shouldn't have to run `init` first just to create
+  // their first agent. If the store isn't bootstrapped, do it now and tell them.
+  const autoInited = !(await isInitialized());
+  if (autoInited) await init({});
   const ask = await elicitMissing('create', args as unknown as Record<string, unknown>, [
     { name: 'slug', required: true, label: '새 에이전트 식별자 (영소문자/숫자/하이픈)', example: 'jiyoon' },
     { name: 'name', required: true, label: '실제 이름', example: '이지윤' },
     { name: 'role', required: true, label: '직무 / 부서', example: '프로덕트 디자이너' },
+    { name: 'signer', required: false, label: '서명자 (주면 만들면서 바로 active)' },
     { name: 'tenure', required: false, label: '재직 기간' },
     { name: 'bio', required: false, label: '한 줄 소개' },
     { name: 'expertise', required: false, label: '자신있는 카테고리' },
@@ -125,31 +138,51 @@ export async function runCreate(args: CreateArgs): Promise<ToolReply> {
     trainedAt: null,
   });
 
+  // One-shot sign: when `signer` is supplied, consent + activate immediately so
+  // create → sign collapses into a single call (the common self-handoff case).
+  let signed = false;
+  if (args.signer && args.signer.trim().length > 0) {
+    try {
+      await signConsent(args.slug, args.signer);
+      signed = true;
+    } catch {
+      // Non-fatal — the agent still exists as draft; user can sign explicitly.
+    }
+  }
+
   const lines: string[] = [];
+  if (autoInited) lines.push('✓ (Afterglow 를 자동 초기화했어요 — init 따로 안 해도 됩니다.)');
   lines.push(`✦ 에이전트 폴더 생성: ${agentDir(args.slug)}`);
   for (const p of created) lines.push(`  · ${p}`);
   lines.push(`  · persona.json`);
   lines.push(`  · system-prompt.md`);
   lines.push(`  · consent.md`);
   lines.push('');
-  lines.push(`상태: draft (동의서 서명 전 — ask 호출은 거부됩니다)`);
-  lines.push('');
-  lines.push('다음 단계:');
-  lines.push(`  · /afterglow inspect ${args.slug}     — 생성된 페르소나 확인`);
-  lines.push(
-    `  · /afterglow sign ${args.slug} --signer "이름"   — active 전환 (ask 가능)`,
-  );
-  lines.push(
-    `  · /afterglow ask ${args.slug} "..."    — 서명 후 첫 질문`,
-  );
+  if (signed) {
+    lines.push(`상태: active ✓ (${sanitisePromptLine(args.signer!, 80)} 서명 — 바로 ask 가능)`);
+    lines.push('');
+    lines.push('다음 단계:');
+    lines.push(`  · /afterglow learn ${args.slug} --path ./<폴더>  또는  --text "<지식 붙여넣기>"   — 자료 학습 (ask 가 검색할 내용)`);
+    lines.push(`  · /afterglow ask ${args.slug} "..."    — 바로 질문`);
+  } else {
+    lines.push(`상태: draft (동의서 서명 전 — ask 호출은 거부됩니다)`);
+    lines.push('  팁: 다음엔 create 시 `--signer "이름"` 을 주면 만들면서 바로 활성화돼요.');
+    lines.push('');
+    lines.push('다음 단계:');
+    lines.push(`  · /afterglow sign ${args.slug} --signer "이름"   — active 전환 (ask 가능)`);
+    lines.push(`  · /afterglow learn ${args.slug} --text "<지식>"   — 자료 학습`);
+    lines.push(`  · /afterglow ask ${args.slug} "..."    — 서명 후 첫 질문`);
+  }
   await auditAppend({
     tool: 'afterglow_create',
     slug: args.slug,
-    summary: `created (${persona.name}, ${persona.role})`,
+    summary: `created (${persona.name}, ${persona.role})${signed ? ' + signed' : ''}`,
     meta: {
       expertise: persona.expertise,
       sources: persona.sources.length,
       mcpAllow: persona.mcpAllow,
+      autoInited,
+      signed,
     },
   });
   return { content: [{ type: 'text', text: lines.join('\n') }] };
