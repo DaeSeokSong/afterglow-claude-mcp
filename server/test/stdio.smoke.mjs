@@ -10,7 +10,7 @@
  *   → export → verify → import → status → gc → suggest-questions
  *   → transcribe → audit checkpoint
  *
- * Verifies tool count (24), names, and that each call returns a content block.
+ * Verifies tool count (26), names, and that each call returns a content block.
  *
  * Run as: node test/stdio.smoke.mjs
  */
@@ -94,12 +94,14 @@ const EXPECTED_TOOLS = [
   'afterglow_edit',
   'afterglow_export',
   'afterglow_gc',
+  'afterglow_guide',
   'afterglow_handoff',
   'afterglow_history',
   'afterglow_import',
   'afterglow_init',
   'afterglow_inspect',
   'afterglow_interview',
+  'afterglow_learn',
   'afterglow_list',
   'afterglow_recalibrate',
   'afterglow_resume',
@@ -132,7 +134,7 @@ try {
   /* ---------- MCP prompts (slash commands /mcp__afterglow__<name>) ---------- */
   const promptsList = await request('prompts/list', {});
   const promptNames = (promptsList?.result?.prompts ?? []).map((p) => p.name);
-  for (const expected of ['init', 'create', 'edit', 'ask', 'interview', 'export', 'status']) {
+  for (const expected of ['guide', 'init', 'create', 'learn', 'edit', 'ask', 'interview', 'export', 'status']) {
     if (!promptNames.includes(expected)) {
       throw new Error(`prompt missing: ${expected} (got ${JSON.stringify(promptNames)})`);
     }
@@ -148,24 +150,25 @@ try {
 
   /* ---------- happy-path call against every tool ---------- */
 
-  assertOk('init', await callTool('afterglow_init', {}));
-  assertOk(
+  // guide works before anything is initialized (zero-friction orientation).
+  const guide0 = assertOk('guide-empty', await callTool('afterglow_guide', {}));
+  if (!/빠른 시작/.test(guide0.content[0].text)) throw new Error('guide did not return orientation');
+
+  // create with --signer auto-inits AND activates in one call (no separate
+  // init/sign needed) — the v0.11 ceremony reduction.
+  const created = assertOk(
     'create',
     await callTool('afterglow_create', {
       slug: 'jiyoon',
       name: '이지윤',
       role: '프로덕트 디자이너',
       expertise: ['디자인'],
+      signer: '이지윤',
     }),
   );
-  assertOk(
-    'sign',
-    await callTool('afterglow_sign', {
-      slug: 'jiyoon',
-      signer: 'smoke runner',
-      note: 'stdio smoke test',
-    }),
-  );
+  if (!/active/.test(created.content[0].text)) throw new Error('create --signer did not activate');
+  // init is still idempotent/callable.
+  assertOk('init', await callTool('afterglow_init', {}));
   assertOk('list', await callTool('afterglow_list', { json: true }));
   assertOk('inspect', await callTool('afterglow_inspect', { slug: 'jiyoon' }));
   assertOk(
@@ -177,14 +180,17 @@ try {
     }),
   );
 
-  // Plant a tiny knowledge file so ask + council find something
-  const kdir = join(tmpRoot, 'agents', 'jiyoon', 'knowledge');
-  await mkdir(kdir, { recursive: true });
-  await writeFile(
-    join(kdir, 'note.md'),
-    '온보딩 step 2 설명을 절반으로 줄여서 이탈이 22%에서 9%로 떨어졌어요.',
-    'utf8',
+  // Teach the agent via the learn tool (no manual folder hunting) so ask +
+  // council find something — exercises the v0.11 knowledge-ingestion path.
+  const learned = assertOk(
+    'learn',
+    await callTool('afterglow_learn', {
+      slug: 'jiyoon',
+      text: '온보딩 step 2 설명을 절반으로 줄여서 이탈이 22%에서 9%로 떨어졌어요.',
+      title: 'onboarding-note',
+    }),
   );
+  if (!/학습/.test(learned.content[0].text)) throw new Error('learn did not confirm ingestion');
 
   const ask = assertOk(
     'ask',
@@ -192,6 +198,9 @@ try {
   );
   if (!/# 호출 컨텍스트/.test(ask.content[0].text)) {
     throw new Error('ask did not return expected header');
+  }
+  if (!/이탈/.test(ask.content[0].text)) {
+    throw new Error('ask did not retrieve the learned knowledge');
   }
 
   // Second agent for council
@@ -557,6 +566,7 @@ try {
   console.log(`  v0.5 prompts       : ${promptNames.length} slash commands (/mcp__afterglow__*)  OK`);
   console.log(`  v0.8 elicitation   : missing-arg → guided choices ([필수]/[선택] + candidates)  OK`);
   console.log(`  v0.8 status env    : RAG ${statusJson.env.ragMode} · whisper ${statusJson.env.whisperEngine} · PII ${statusJson.env.piiRedaction} · enc ${statusJson.env.encryptionAtRest}  OK`);
+  console.log(`  v0.11 usability    : guide (orientation) + create --signer (auto-init+activate) + learn (knowledge ingest)  OK`);
 } catch (err) {
   console.error('smoke: FAIL');
   console.error(err instanceof Error ? err.stack : String(err));
