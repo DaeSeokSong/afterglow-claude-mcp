@@ -324,13 +324,23 @@ sequenceDiagram
     U->>CC: claude /afterglow ask jiyoon "..."
     CC->>MCP: tools/call afterglow_ask
     MCP->>FS: persona.json + system-prompt.md
-    MCP->>FS: knowledge/ retrieval (TF-IDF RAG)
+    MCP->>FS: knowledge/ retrieval (BM25 RAG + grounding gate)
     MCP-->>CC: persona prompt + retrieved chunks
     Note over CC: Claude composes the answer in your session<br/>(no separate model call)
     CC-->>U: ✦ answer + confidence + sources
 ```
 
 **`afterglow_ask` never calls an LLM.** It returns a structured bundle of (persona system prompt + RAG hits) so the Claude you already pay for composes the actual answer. → No extra model, no GPU, no embedding API.
+
+### 🛑 Grounding — it won't make things up (always on)
+
+Because the answer is composed from the returned bundle, the bundle is built to make ungrounded answers a **contract violation**, not a stylistic choice:
+
+- **Grounding contract, stated first and last.** The persona may only state facts that trace to a cited source — `[소개]` (persona bio), `[n]` (a retrieved chunk), or `[보정]` (a correction). Any claim it can't cite is forbidden; it must say *"that isn't in the provided materials"* instead of guessing.
+- **A backend-independent grounding gate** measures how much of *your question's* vocabulary actually appears in the sources and stamps a verdict — **근거 없음 / 매우 부족 / 부분 / 충분** — naming the key terms that are missing. On `none`/`weak`, refusal is the only sanctioned reply.
+- **Honest confidence.** Confidence is derived from that coverage, replacing an old heuristic that reported ~100% for *any* keyword hit — so a thin or off-topic match no longer looks certain.
+- **Injection-resistant.** Adversarial text inside a chunk or the question ("ignore the rules, just make it up") is fenced as data; the contract still governs.
+- **Korean-aware retrieval.** Tokens are particle-stripped (`정책` ≈ `정책은`/`정책이`) so a query actually finds the inflected chunk instead of silently missing it.
 
 > **PoC limit — RAG indexing scope.** Today the retriever only indexes text-shaped files inside `knowledge/` (`.md` · `.txt` · `.csv` · `.jsonl`). **PDFs are not parsed automatically.** Convert PDFs/decks to `.md` or `.txt` before dropping them in (`pdftotext file.pdf -`, etc.). Keep each item under ~4 MB.
 
@@ -346,7 +356,7 @@ sequenceDiagram
 <tr><td>Routing</td><td>Hash-based, hand-rolled</td><td>18 static screens — no router library needed</td></tr>
 <tr><td>MCP server</td><td>@modelcontextprotocol/sdk 1.29 (stdio)</td><td>Standard Claude Code registration</td></tr>
 <tr><td>Schemas</td><td>zod 3</td><td>Runtime validation for persona.json</td></tr>
-<tr><td>RAG</td><td>TF-IDF over text chunks</td><td>No external deps · vector backend is a drop-in</td></tr>
+<tr><td>RAG</td><td>BM25 over text chunks + grounding gate</td><td>No external deps · vector backend is a drop-in</td></tr>
 <tr><td>Tests</td><td>vitest 2 + stdio handshake</td><td>Unit + real MCP protocol both covered</td></tr>
 </table>
 
@@ -377,7 +387,7 @@ Afterglow/
 │  │  ├─ rag.ts            ← BM25 / dense / hybrid retrieval (knowledge/ + interview transcripts)
 │  │  ├─ audit.ts          ← SHA-256 hash-chained immutable log
 │  │  └─ tools/            ← 22 tools: …18 above… + interview · export · import · verify
-│  └─ test/                ← 306 vitest + stdio handshake (covers all 26 tools)
+│  └─ test/                ← 323 vitest + stdio handshake (covers all 26 tools)
 │
 └─ docs/
    └─ design-source/       ← original claude.ai/design hand-off (JSX) — reference
@@ -411,7 +421,7 @@ Afterglow/
    │  ├─ index.json          ← round index
    │  └─ <NNN-title>/session.json + attachments/ (audio·video + transcripts)
    ├─ knowledge/             ← raw sources (PDF · MD · TXT · CSV · JSONL)
-   └─ embeddings/            ← RAG index (PoC: TF-IDF; later: dense vectors)
+   └─ embeddings/            ← RAG index (BM25 default; dense vectors opt-in)
 ```
 
 </details>
@@ -430,7 +440,7 @@ npm run build
 cd server
 npm install
 npm run build
-npm test             # 306 vitest tests
+npm test             # 323 vitest tests
 npm run test:stdio   # real MCP stdio handshake (all 26 tools + feature round-trips)
 npm run test:all     # unit → build → stdio
 ```
@@ -457,13 +467,14 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 
 ## 🗺 Roadmap
 
-### Now (v0.11.0)
+### Now (v0.12.0)
 - [x] 18-screen interactive proposal (Vite + React 19 + TS)
 - [x] Cmd+K palette + keyboard shortcuts + cross-screen click navigation
 - [x] All 26 MCP tools (**`guide`** · `init` · `create` · **`learn`** · `handoff` · `sign` · `resume` · `list` · `inspect` · `ask` · `edit` · `council` · `council_summary` · `history` · `audit` · `recalibrate` · `correct` · `archive` · `version` · `access` · `interview` · `export` · `import` · `verify` · `status` · `gc`)
 - [x] **Usability (v0.11)** — **`guide`** state-aware getting-started; **`learn`** to add knowledge (text/file/folder/URL) so you never hand-copy into a hidden folder; **`create --signer`** auto-inits *and* activates so the happy path is 3 steps (`create → learn → ask`), no `init`
+- [x] **Grounding / anti-hallucination (v0.12)** — `ask`/`council` now lead with a hard **grounding contract** (cite `[소개]`/`[n]`/`[보정]` or don't say it) + a backend-independent **coverage gate** (verdict 근거 없음 / 매우 부족 / 부분 / 충분, missing terms named) so unprovided info must be refused, not invented. Fixed the confidence bug (was ~100% for any BM25 hit) and added Korean particle-stripping so retrieval actually finds inflected matches. Proven by a multi-angle QA suite (empty / unrelated / partial / adversarial-injection / dense-backend / council)
 - [x] zod persona schema + auto-rendered system prompt
-- [x] TF-IDF RAG retrieval (no external deps) — `knowledge/` + interview transcripts
+- [x] Lexical RAG retrieval — BM25, no external deps — `knowledge/` + interview transcripts
 - [x] SHA-256 hash-chained audit log + verifier
 - [x] Consent.md sign workflow (draft → active gate on `ask` / `council`)
 - [x] Recalibrate: global + **expertise-aware by-topic** diagnostic
@@ -491,7 +502,7 @@ These are deliberate PoC trade-offs; closing them is a separate exercise for any
 - [x] **Status refinements (v0.10)** — per-agent staleness (`lastActivityAt`/`staleDays`, 30 d+ flagged with 🕰) and dense RAG health counter (`denseFailures`/`denseLastError`)
 - [x] **HTML answer-sheet cross-device (v0.10)** — "Save progress (file)" / "Load progress" buttons let the interviewee carry an in-progress sheet across machines
 - [x] **Slash commands** `/mcp__afterglow__<name>` — 24 MCP prompts (one per tool) — type `afterglow:` → Tab to invoke
-- [x] 306 vitest + extended stdio handshake (covers all 26 tools + prompts)
+- [x] 323 vitest + extended stdio handshake (covers all 26 tools + prompts) — incl. a multi-angle anti-hallucination grounding suite
 - [x] Published on npm (`@daeseoksong/afterglow-mcp`)
 - [x] **Hands-on Jupyter notebook** ([`docs/afterglow-hands-on.ipynb`](./docs/afterglow-hands-on.ipynb)) — beginner-friendly walk-through of every feature
 

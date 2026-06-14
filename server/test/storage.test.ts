@@ -199,8 +199,10 @@ describe('tools — end-to-end', () => {
     const askText = r5.content[0].text;
     expect(askText).toContain('# 호출 컨텍스트');
     expect(askText).toContain('## 사용자 질문');
-    expect(askText).toContain('## 페르소나 시스템 프롬프트');
-    expect(askText).toContain('## 검색된 자료');
+    expect(askText).toContain('[근거 A] 페르소나 소개');
+    expect(askText).toContain('[근거 C] 검색된 자료');
+    expect(askText).toContain('답변 규칙');         // grounding contract present
+    expect(askText).toContain('근거 판정');          // verdict banner present
     expect(askText).toContain('step 2 설명 단축');
   });
 

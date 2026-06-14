@@ -91,7 +91,7 @@ import { guideShape, runGuide } from './tools/guide.js';
 import { registerPrompts } from './prompts.js';
 import { errorReply, type ToolReply } from './tools/types.js';
 
-const SERVER_VERSION = '0.11.0';
+const SERVER_VERSION = '0.12.0';
 
 export function buildServer(): McpServer {
   const server = new McpServer(

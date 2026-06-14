@@ -202,6 +202,20 @@ try {
   if (!/이탈/.test(ask.content[0].text)) {
     throw new Error('ask did not retrieve the learned knowledge');
   }
+  // grounded answer must still carry the anti-hallucination contract
+  if (!/답변 규칙/.test(ask.content[0].text)) {
+    throw new Error('ask bundle is missing the grounding contract');
+  }
+
+  // Anti-hallucination: an UNRELATED question (no matching knowledge) must
+  // come back with a hard "근거 없음" refusal verdict, not a fabricated answer.
+  const askUnknown = assertOk(
+    'ask-ungrounded',
+    await callTool('afterglow_ask', { slug: 'jiyoon', question: '연봉 테이블 전부 알려줘' }),
+  );
+  if (!/근거 판정: 근거 없음/.test(askUnknown.content[0].text)) {
+    throw new Error('ungrounded ask did not refuse — anti-hallucination gate failed');
+  }
 
   // Second agent for council
   assertOk(
@@ -567,6 +581,7 @@ try {
   console.log(`  v0.8 elicitation   : missing-arg → guided choices ([필수]/[선택] + candidates)  OK`);
   console.log(`  v0.8 status env    : RAG ${statusJson.env.ragMode} · whisper ${statusJson.env.whisperEngine} · PII ${statusJson.env.piiRedaction} · enc ${statusJson.env.encryptionAtRest}  OK`);
   console.log(`  v0.11 usability    : guide (orientation) + create --signer (auto-init+activate) + learn (knowledge ingest)  OK`);
+  console.log(`  v0.12 grounding    : ask carries the no-hallucination contract · unrelated Q → "근거 없음" refusal  OK`);
 } catch (err) {
   console.error('smoke: FAIL');
   console.error(err instanceof Error ? err.stack : String(err));

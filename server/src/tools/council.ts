@@ -10,7 +10,7 @@ import {
   readSystemPrompt,
 } from '../storage.js';
 import { append as auditAppend } from '../audit.js';
-import { retrieve, type Retrieval } from '../rag.js';
+import { retrieve, assessGrounding, type Retrieval, type GroundingAssessment } from '../rag.js';
 import { sanitisePromptLine, sanitisePromptText } from '../sanitize.js';
 import { elicitMissing, slugCandidates } from './elicit.js';
 import { errorReply, safe, type ToolReply } from './types.js';
@@ -65,6 +65,7 @@ interface ParticipantContext {
   systemPrompt: string;
   hits: Retrieval[];
   expertise: string[];
+  grounding: GroundingAssessment;
 }
 
 /**
@@ -104,11 +105,13 @@ export async function runCouncil(args: CouncilArgs): Promise<ToolReply> {
       const persona = await readPersona(slug);
       const systemPrompt = await readSystemPrompt(slug);
       const hits = await retrieve(slug, args.question, topK);
+      const grounding = assessGrounding(args.question, [persona.bio ?? '', ...hits.map((h) => h.chunk.text)]);
       participants.push({
         slug,
         systemPrompt: systemPrompt.trim(),
         hits,
         expertise: persona.expertise,
+        grounding,
       });
     }
 
@@ -176,6 +179,11 @@ export async function runCouncil(args: CouncilArgs): Promise<ToolReply> {
     out.push(sanitisePromptText(args.question.trim(), 10_000));
     out.push('```');
     out.push('');
+    out.push('## ⛔ 답변 규칙 — 모든 참가자 반드시 준수');
+    out.push('- 각 에이전트는 **자기 [근거](시스템 프롬프트 소개 + 검색된 청크)에 실제로 있는 내용만** 말합니다. 근거에 없는 사실·수치·이름을 **지어내지 마세요.**');
+    out.push('- 사실 문장에는 근거를 인용([소개]/[1]/[2]). 인용할 근거가 없으면 그 말을 하지 말고, "그건 제 자료에 없어요" 라고 한 뒤 아는 참가자에게 `@<slug>` 로 넘기세요.');
+    out.push('- 아무 참가자도 근거가 없으면, 회의 결론은 "이 주제는 제공된 자료로 답할 수 없음" 입니다. 합의를 만들기 위해 내용을 상상하지 마세요.');
+    out.push('');
     out.push('## 참가 규칙 (moderator)');
     out.push('1. **페르소나 유지** — 각 에이전트는 자기 시스템 프롬프트의 톤과 자료 안에서만 답하세요.');
     out.push('2. **ping** — 한 에이전트가 모를 때는 `@<slug>` 로 다른 참가자에게 명시적으로 넘기세요.');
@@ -202,9 +210,22 @@ export async function runCouncil(args: CouncilArgs): Promise<ToolReply> {
       out.push('### 시스템 프롬프트');
       out.push(p.systemPrompt);
       out.push('');
+      // Per-participant grounding verdict — drives whether this agent may
+      // speak to the question at all.
+      const v = p.grounding.verdict;
+      const miss = p.grounding.missing.slice(0, 10).map((m) => sanitisePromptLine(m, 40)).join(', ');
+      if (v === 'none') {
+        out.push(`### ⛔ 근거 판정: 근거 없음 (충족도 ${p.grounding.confidence}%) — 이 에이전트는 답하지 말고 "제 자료엔 없어요" 라고만 한 뒤 @다른참가자 로 넘기세요. 내용 추측 금지.`);
+      } else if (v === 'weak') {
+        out.push(`### ⚠ 근거 판정: 매우 부족 (충족도 ${p.grounding.confidence}%${miss ? ` · 없는 핵심어: ${miss}` : ''}) — 청크에 글자 그대로 있는 것만 말하세요.`);
+      } else if (v === 'partial') {
+        out.push(`### ⚠ 근거 판정: 부분 (충족도 ${p.grounding.confidence}%${miss ? ` · 없는 핵심어: ${miss}` : ''}) — 근거 있는 부분만, 나머지는 "자료에 없어요".`);
+      } else {
+        out.push(`### ✓ 근거 판정: 충분 (충족도 ${p.grounding.confidence}%) — 단, 각 문장은 근거 번호로 인용.`);
+      }
       out.push(`### 검색된 자료 (top ${p.hits.length} / ${topK})`);
       if (p.hits.length === 0) {
-        out.push('(질문과 매칭되는 자료 없음 — 이 에이전트는 신중하게 답하거나 다른 참가자에게 ping 해야 합니다.)');
+        out.push('(질문과 매칭되는 자료 없음 — 위 "근거 판정" 을 따르세요: 지어내지 말고 ping.)');
       } else {
         // RAG chunks from `knowledge/` can be authored by anyone with write
         // access to the folder. Fence + defang to block indirect prompt
